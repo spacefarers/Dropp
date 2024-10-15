@@ -25,8 +25,8 @@ class Instance {
 
     this.devFlag = this.config.get("debug");
     this.windowConfig = {
-      width: 200,
-      height: 200,
+      width: 400,
+      height: 400,
       x: 0,
       y: 0,
       transparent: true,
@@ -55,8 +55,11 @@ class Instance {
       this.windowConfig.x = cursorPosition.x;
       this.windowConfig.y = cursorPosition.y;
     }
-    else this.windowConfig.x = screen.getPrimaryDisplay().workArea.width / 2 - 100;
-
+    else {
+      this.windowConfig.x = screen.getPrimaryDisplay().workArea.width - 400;
+        this.windowConfig.y = screen.getPrimaryDisplay().workArea.height/2 - 100;
+    }
+    this.windowConfig.movable = false;
     this.instance = new BrowserWindow(this.windowConfig);
 
     const html_path = path.join(__dirname, "../static/index.html");

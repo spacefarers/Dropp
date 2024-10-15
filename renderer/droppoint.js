@@ -71,6 +71,10 @@ const imageHolder = document.querySelectorAll(".file-icon img");
 
 let fq = new FileQueueUI();
 
+document.addEventListener('dragenter', () => {
+    console.log('File drag started')
+});
+
 document.addEventListener("file-push", () => {
   fq.enqueue(filelist[filelist.length - 1].fileType);
   for (let i = 0; i < fq.length(); i++) {
@@ -93,17 +97,22 @@ const holder = document.getElementById("droppoint");
 // Adding "dragged" class to the holder when the file is dragged over it
 // "Dragged" class is used to do the border animation
 holder.ondragover = (e) => {
+  console.log("drag over");
   e.preventDefault;
   e.stopPropagation;
   holder.setAttribute("class", "dragged");
   return false;
 };
 holder.ondragenter = (e) => {
+  console.log("drag enter");
   e.preventDefault;
   e.stopPropagation;
   holder.setAttribute("class", "dragged");
   return false;
 };
+holder.ondragstart = (e) => {
+  console.log("drag started");
+}
 // Removing the "dragged" class from the holder
 // when the file is dragged out of it
 holder.ondragleave = (e) => {
@@ -122,6 +131,7 @@ holder.ondragend = (e) => {
 const uploadArea = document.querySelector(".upload");
 const dragOutArea = document.querySelector("#drag");
 holder.ondrop = (e) => {
+  console.log("drop");
   e.preventDefault();
   // Remove animation borders on file drop inside DropPoint
   holder.removeAttribute("class");
