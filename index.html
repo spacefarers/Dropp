@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dropp</title>
+    <style>
+        * {
+            padding: 0;
+            margin: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+            'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
+            'Helvetica Neue', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Drag and Drop Area */
+        #dropp {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-55%, -55%);
+            width: 140px;
+            height: 140px;
+            color: #050a0fa2;
+            border: 2px transparent solid;
+            transition: all 0.5s ease-in-out;
+            -webkit-app-region: no-drag;
+        }
+
+        /* Shared Styles for Upload and Drag States */
+        #dropp>div {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            text-align: center;
+            flex-direction: column;
+            font-family: sans-serif;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Upload State */
+        .upload {
+            user-select: none;
+        }
+
+        .upload img {
+            max-width: 60px;
+            padding: 8px;
+            opacity: 0.8;
+            pointer-events: none;
+        }
+
+        /* Drag State */
+        #drag {
+            display: none;
+        }
+
+        /* File Icon Animations */
+        @keyframes tilt {
+            to {
+                transform: rotate(25deg);
+                transform-origin: bottom;
+            }
+        }
+
+        @keyframes tiltmore {
+            to {
+                transform: rotate(50deg);
+                transform-origin: bottom;
+            }
+        }
+
+        .file-icon {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .file-icon img {
+            position: absolute;
+            filter: drop-shadow(2px 2px 4px #050a0f2c);
+        }
+
+        .file-icon img:nth-child(1) {
+            z-index: 3;
+        }
+
+        .file-icon img:nth-child(2) {
+            z-index: 2;
+            animation: tilt 0.25s ease forwards;
+        }
+
+        .file-icon img:nth-child(3) {
+            z-index: 1;
+            animation: tiltmore 0.25s ease forwards;
+        }
+
+        /* Dragged State Animation */
+        @keyframes dragged {
+            to {
+                border-radius: 6px;
+                border: 2px dashed #050a0f85;
+            }
+        }
+
+        .dragged {
+            cursor: grabbing;
+            animation: dragged 0.5s forwards;
+        }
+
+        /* Close Button */
+        .close {
+            width: 1rem;
+            height: 1rem;
+            font-size: 0.8rem;
+            display: flex;
+            background-color: #c0c0c0;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            right: 5%;
+            top: 5%;
+            border-radius: 2rem;
+            z-index: 10;
+            cursor: pointer;
+            user-select: none;
+            -webkit-app-region: no-drag;
+        }
+
+        /* Main Container */
+        .container {
+            -webkit-app-region: drag;
+            border-radius: 0.5rem;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 250, 240);
+            backdrop-filter: blur(20px) saturate(125%);
+        }
+    </style>
+</head>
+<script src="https://kit.fontawesome.com/40c8013fd3.js" crossorigin="anonymous"></script>
+<body>
+<div class="container" id="mainWindow">
+    <div class="close" title="Clear">&#215;</div>
+    <div id="dropp">
+        <div class="upload" id="uploadText">
+            <i class="fa-solid fa-upload"></i>
+            Drop Your File(s) Here
+        </div>
+        <div id="files">
+
+        </div>
+    </div>
+</div>
+</body>
+<script src="./dropp.js"></script>
+</html>
