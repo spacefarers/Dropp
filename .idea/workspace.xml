@@ -5,37 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="1eda39f2-dcb9-4877-9e21-ecf1cc3951be" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.deepsource.toml" beforeDir="false" afterPath="$PROJECT_DIR$/.deepsource.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.github/FUNDING.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.github/ISSUE_TEMPLATE/bug_report.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.github/ISSUE_TEMPLATE/feature_request.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.github/workflows/build.yml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.vscode/launch.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.yml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/LICENSE" beforeDir="false" afterPath="$PROJECT_DIR$/LICENSE" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/CONTRIBUTING.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/CONTRIBUTING.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/PULL_REQUEST_TEMPLATE.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/PULL_REQUEST_TEMPLATE.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/renderer/droppoint.js" beforeDir="false" afterPath="$PROJECT_DIR$/renderer/droppoint.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/renderer/settings-renderer.js" beforeDir="false" afterPath="$PROJECT_DIR$/renderer/settings-renderer.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/App.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/App.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/History.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/History.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Icons.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/Icons.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/RequestHandlers.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/RequestHandlers.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Settings.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/Settings.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Shortcut.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/Shortcut.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Tray.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/Tray.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/Window.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/Window.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/configOptions.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/configOptions.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/preload.js" beforeDir="false" afterPath="$PROJECT_DIR$/src/preload.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/static/index.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/settings.css" beforeDir="false" afterPath="$PROJECT_DIR$/static/settings.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/settings.html" beforeDir="false" afterPath="$PROJECT_DIR$/static/settings.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/static/tailwind/settings-input.css" beforeDir="false" afterPath="$PROJECT_DIR$/static/tailwind/settings-input.css" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tailwind.config.js" beforeDir="false" afterPath="$PROJECT_DIR$/tailwind.config.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/dropp.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/main.js" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/preload.js" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/vcs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -47,6 +22,9 @@
   </component>
   <component name="MarkdownSettingsMigration">
     <option name="stateVersion" value="1" />
+  </component>
+  <component name="PackageJsonUpdateNotifier">
+    <dismissed value="$PROJECT_DIR$/package.json" />
   </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 7
@@ -61,24 +39,16 @@
     &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/spacefarers/code/Dropp&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/code/Dropp&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
     &quot;ts.external.directory.path&quot;: &quot;C:\\Program Files\\JetBrains\\WebStorm 2023.3.4\\plugins\\javascript-impl\\jsLanguageServicesImpl\\external&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
-  <component name="SharedIndexes">
-    <attachedChunks>
-      <set>
-        <option value="bundled-js-predefined-d6986cc7102b-5c90d61e3bab-JavaScript-WS-242.23339.15" />
-      </set>
-    </attachedChunks>
-  </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TaskManager">
     <task active="true" id="Default" summary="Default task">
@@ -88,8 +58,8 @@
       <option name="presentableId" value="Default" />
       <updated>1728166988461</updated>
       <workItem from="1728166989541" duration="1280000" />
-      <workItem from="1728178147142" duration="25000" />
-      <workItem from="1728178176329" duration="129000" />
+      <workItem from="1728963724833" duration="2524000" />
+      <workItem from="1731026436533" duration="1812000" />
     </task>
     <servers />
   </component>
