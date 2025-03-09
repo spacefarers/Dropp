@@ -7,7 +7,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 });
 
 // Listen for drag events on the document
-document.addEventListener('dragover', () => {
+document.addEventListener('dragover', (e) => {
+    console.log('Drag over detected in renderer');
     ipcRenderer.send('dragging-file');
 });
 

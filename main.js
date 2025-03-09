@@ -3,46 +3,63 @@ const {join} = require("path");
 let mainWindow;
 
 function createWindow() {
+    console.log('Creating main window...');
     mainWindow = new BrowserWindow({
         width: 200,
         height: 400,
         webPreferences: {
             preload: join(__dirname, 'preload.js'),
         },
-        transparent: true, // Make the window transparent
-        frame: false,      // Remove window frame
-        alwaysOnTop: true, // Keep it on top of other windows
-        hasShadow: false,  // Optional: remove shadow for cleaner look
+        transparent: true,
+        frame: false,
+        alwaysOnTop: true,
+        hasShadow: false,
+        resizable: false,
+        skipTaskbar: true,
+        focusable: false,
+        show: false // Start hidden
     });
+
     const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
     const x = screenWidth - mainWindow.getBounds().width;
     const y = (screenHeight / 2) - (mainWindow.getBounds().height / 2);
     mainWindow.setPosition(x, y);
-    // mainWindow.setPosition(screen.getPrimaryDisplay().workAreaSize.width - mainWindow.getBounds().width, (screen.getPrimaryDisplay().workAreaSize.height - mainWindow.getBounds().height) / 2);
-    mainWindow.loadFile('index.html');
-    mainWindow.setIgnoreMouseEvents(true, { forward: true });
-    // hide document body
-    // mainWindow.setFocusable(false); // Disable focusing
-
-    // Hide window when it's not focused
-    // mainWindow.on('blur', () => {
-    //     mainWindow.hide();
-    // });
+    
+    console.log('Loading index.html...');
+    mainWindow.loadFile('index.html')
+        .then(() => {
+            console.log('Window loaded, setting initial state...');
+            mainWindow.setIgnoreMouseEvents(true, { forward: true });
+            mainWindow.webContents.executeJavaScript('document.body.style.opacity = 0;');
+            mainWindow.show(); // Show after initial setup
+            console.log('Window should now be visible');
+        })
+        .catch(err => {
+            console.error('Failed to load window:', err);
+        });
 }
 
 let fileDragging = false;
 let windowVisible = false;
 
 const hideWindow = () => {
+    console.log('Hiding window...');
     windowVisible = false;
     mainWindow.setIgnoreMouseEvents(true, { forward: true });
-    mainWindow.webContents.executeJavaScript('fadeOut();');
+    mainWindow.webContents.executeJavaScript('fadeOut();')
+        .then(() => console.log('Fade out complete'))
+        .catch(err => console.error('Fade out failed:', err));
 }
 
 const showWindow = () => {
-    windowVisible = true;
-    mainWindow.setIgnoreMouseEvents(false);
-    mainWindow.webContents.executeJavaScript('fadeIn();');
+    console.log('Showing window...');
+    if (!windowVisible) {
+        windowVisible = true;
+        mainWindow.setIgnoreMouseEvents(false);
+        mainWindow.webContents.executeJavaScript('fadeIn();')
+            .then(() => console.log('Fade in complete'))
+            .catch(err => console.error('Fade in failed:', err));
+    }
 }
 
 app.whenReady().then(() => {
