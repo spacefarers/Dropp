@@ -47,23 +47,34 @@ const showWindow = () => {
 
 app.whenReady().then(() => {
     createWindow();
-    console.log('app is ready');
-    // Listen for drag events from renderer
-    ipcMain.on('dragging-file', (event) => {
-        console.log('dragging over');
-        fileDragging = true;
+    
+    // Listen for window control events
+    ipcMain.on('show-window', () => {
+        showWindow();
     });
-    ipcMain.on("mouse-enter", (event) => {
+    
+    ipcMain.on('hide-window', () => {
+        hideWindow();
+    });
+
+    // Listen for drag events from renderer
+    ipcMain.on('dragging-file', () => {
+        fileDragging = true;
+        showWindow();
+    });
+    
+    ipcMain.on('mouse-enter', () => {
         fileDragging = false;
         mainWindow.setIgnoreMouseEvents(false);
-    //     give 50ms for drag event to fire
         setTimeout(() => {
             if (!fileDragging) {
                 mainWindow.setIgnoreMouseEvents(true, { forward: true });
-            } else {
-                showWindow();
             }
         }, 50);
+    });
+    
+    ipcMain.on('mouse-leave', () => {
+        hideWindow();
     });
 });
 

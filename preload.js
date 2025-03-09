@@ -1,18 +1,20 @@
-const { ipcRenderer } = require('electron');
+const { ipcRenderer, contextBridge } = require('electron');
+
+// Expose window control methods to renderer
+contextBridge.exposeInMainWorld('electronAPI', {
+    showWindow: () => ipcRenderer.send('show-window'),
+    hideWindow: () => ipcRenderer.send('hide-window')
+});
 
 // Listen for drag events on the document
-
 document.addEventListener('dragover', () => {
-    console.log('dragging over');
     ipcRenderer.send('dragging-file');
 });
 
 document.addEventListener('mouseleave', () => {
-    console.log('mouse left');
+    ipcRenderer.send('mouse-leave');
 });
 
 document.addEventListener('mouseenter', () => {
-//     check if there is currently a file being dragged
-    console.log('mouse entered');
     ipcRenderer.send('mouse-enter');
 });
