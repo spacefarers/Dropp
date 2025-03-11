@@ -5,7 +5,8 @@ from shelf_window import ShelfWindow
 
 class TrayApp:
     def __init__(self):
-        self.app = QApplication(sys.argv)
+        # Force xcb platform plugin for Linux compatibility
+        self.app = QApplication(['--platform', 'xcb'] + sys.argv)
         self.tray_icon = QSystemTrayIcon(QIcon(":/icons/tray_icon.png"))
         self.shelf_window = ShelfWindow()
         
