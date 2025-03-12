@@ -3,7 +3,6 @@
 <qresource prefix="/">
     <file alias="icons/tray_icon.png">icons/tray_icon.png</file>
     <file alias="icons/shelf_icon.png">icons/shelf_icon.png</file>
-    <file alias="icons/view.png">icons/view.png</file>
     <file alias="icons/remove.png">icons/remove.png</file>
     <file alias="icons/file.png">icons/file.png</file>
     <file alias="icons/folder.png">icons/folder.png</file>

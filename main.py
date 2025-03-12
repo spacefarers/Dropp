@@ -10,6 +10,20 @@ if platform.system() == 'Darwin':
 
 class TrayApp:
     def __init__(self):
+        # Load server_files.json
+        self.server_files_path = os.path.join(os.path.expanduser("~"), "Library", "Application Support", "Dropp", "server_files.json")
+        self.server_files = {}
+        if os.path.exists(self.server_files_path):
+            try:
+                with open(self.server_files_path, 'r') as f:
+                    import json
+                    self.server_files = json.load(f)
+            except json.JSONDecodeError:
+                print("Warning: Could not decode server_files.json, initializing empty.")
+                self.server_files = {}
+        else:
+            print("server_files.json not found, initializing empty.")
+
         # Force xcb platform plugin for Linux compatibility
         self.app = QApplication(['--platform', 'xcb'] + sys.argv)
         
@@ -32,7 +46,12 @@ class TrayApp:
         else:
             print(f"Loading tray icon from: {icon_path}")
             self.tray_icon = QSystemTrayIcon(QIcon(icon_path))
-        self.shelf_window = ShelfWindow()
+        self.tray_icon.activated.connect(self.tray_activated)
+        self.tray_icon.show()
+        
+        # Initialize shelf window with server files
+        self.shelf_window = ShelfWindow(self)
+        self.shelf_window.file_taken.connect(self.on_file_taken)
         self.shelf_window.show()
         self.shelf_window.raise_()
         
@@ -66,6 +85,12 @@ class TrayApp:
         
         # Connect shelf window signals
         self.shelf_window.file_taken.connect(self.on_file_taken)
+    
+    def flush_server_files(self):
+        """Write server_files to disk"""
+        with open(self.server_files_path, 'w') as f:
+            import json
+            json.dump(self.server_files, f, indent=4)
     
     def toggle_shelf(self):
         """Toggle shelf visibility"""
