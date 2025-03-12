@@ -33,6 +33,8 @@ class TrayApp:
             print(f"Loading tray icon from: {icon_path}")
             self.tray_icon = QSystemTrayIcon(QIcon(icon_path))
         self.shelf_window = ShelfWindow()
+        self.shelf_window.show()
+        self.shelf_window.raise_()
         
         # Setup system tray
         menu = QMenu()
