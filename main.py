@@ -57,8 +57,6 @@ class TrayApp:
         # Initialize shelf window with server files
         self.shelf_window = ShelfWindow(self)
         self.shelf_window.file_taken.connect(self.on_file_taken)
-        self.shelf_window.show()
-        self.shelf_window.raise_()
         
         # Setup system tray
         menu = QMenu()
@@ -100,8 +98,10 @@ class TrayApp:
     def toggle_shelf(self):
         """Toggle shelf visibility"""
         if self.shelf_window.isVisible():
+            print("Hiding shelf: tray icon toggle")
             self.shelf_window.hide()
         else:
+            print("Showing shelf: tray icon toggle")
             self.shelf_window.show()
             self.shelf_window.raise_()
     

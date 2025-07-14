@@ -9,11 +9,144 @@ from PyQt6.QtCore import QFileInfo
 from PyQt6.QtWidgets import (QMainWindow, QLabel, QVBoxLayout, QHBoxLayout,
                            QWidget, QApplication, QScrollArea, QFrame, QPushButton, QMenu,
                            QSizePolicy, QGraphicsOpacityEffect, QFileIconProvider, QStyle)
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QUrl, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QUrl, QSize, QPropertyAnimation, QEasingCurve, QTimer, QThread, QObject
 from PyQt6.QtGui import (QDragEnterEvent, QDropEvent, QIcon, QPixmap,
-                       QDrag, QMouseEvent, QPainter, QColor, QPainterPath)
+                       QDrag, QMouseEvent, QPainter, QColor, QPainterPath, QCursor)
 from settings_dialog import APP_SUPPORT_DIR, SETTINGS_FILE
-        
+
+if sys.platform == 'darwin':
+    try:
+        import AppKit
+        from AppKit import NSEvent, NSEventMask, NSApplicationActivationPolicyAccessory
+        from Cocoa import NSObject
+        MACOS_AVAILABLE = True
+    except ImportError:
+        MACOS_AVAILABLE = False
+        print("Warning: macOS APIs not available. Global drag detection will be limited.")
+else:
+    MACOS_AVAILABLE = False
+
+class GlobalDragDetector(QThread):
+    """Advanced global drag detector for macOS that specifically detects file drags"""
+    drag_started = pyqtSignal()
+    drag_ended = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.dragging = False
+        self.monitoring = False
+        self.drag_check_timer = QTimer()
+        self.drag_check_timer.timeout.connect(self.check_for_file_drag)
+        self.drag_check_timer.moveToThread(self)
+        self.last_mouse_location = None
+        self.mouse_down_time = None
+        self.drag_threshold_distance = 10  # pixels
+        self.drag_threshold_time = 0.1  # seconds
+
+    def run(self):
+        """Run the monitoring loop"""
+        self.monitoring = True
+        if MACOS_AVAILABLE:
+            self.drag_check_timer.start(50)  # Check every 50ms for macOS
+        else:
+            # Fallback for non-macOS systems - less frequent checking
+            self.drag_check_timer.start(150)  # Check every 150ms
+        self.exec()
+
+    def check_for_file_drag(self):
+        """Precisely check for file drag operations"""
+        if not self.monitoring:
+            return
+
+        try:
+            if MACOS_AVAILABLE:
+                self.check_macos_file_drag()
+            else:
+                self.check_fallback_file_drag()
+        except Exception as e:
+            print(f"Error in drag detection: {e}")
+
+    def check_macos_file_drag(self):
+        """macOS-specific file drag detection"""
+        # Get current mouse state
+        current_mouse_location = AppKit.NSEvent.mouseLocation()
+        mouse_buttons = AppKit.NSEvent.pressedMouseButtons()
+        left_button_pressed = bool(mouse_buttons & 1)
+
+        if left_button_pressed:
+            # Check if this is a new mouse down
+            if self.last_mouse_location is None:
+                self.last_mouse_location = current_mouse_location
+                self.mouse_down_time = self.get_current_time()
+                return
+
+            # Calculate distance moved
+            dx = current_mouse_location.x - self.last_mouse_location.x
+            dy = current_mouse_location.y - self.last_mouse_location.y
+            distance = (dx * dx + dy * dy) ** 0.5
+            time_elapsed = self.get_current_time() - self.mouse_down_time
+
+            # Check if we've moved enough to be considered a drag
+            if (distance > self.drag_threshold_distance and
+                time_elapsed > self.drag_threshold_time and
+                not self.dragging):
+
+                self.dragging = True
+                self.drag_started.emit()
+
+        else:
+            # Mouse released
+            if self.dragging:
+                print("File drag ended!")
+                self.dragging = False
+                self.drag_ended.emit()
+
+            # Reset tracking
+            self.last_mouse_location = None
+            self.mouse_down_time = None
+
+    def check_fallback_file_drag(self):
+        """Fallback file drag detection for non-macOS systems"""
+        # This is a simplified version that relies on Qt's built-in drag detection
+        # It's less precise but works as a fallback
+        try:
+            app = QApplication.instance()
+            if app:
+                mouse_buttons = app.mouseButtons()
+                if mouse_buttons & Qt.MouseButton.LeftButton:
+                    if not self.dragging:
+                        # Check if any application has drag cursors active
+                        current_cursor = QApplication.overrideCursor()
+                        if current_cursor:
+                            cursor_shape = current_cursor.shape()
+                            drag_cursors = [
+                                Qt.CursorShape.DragMoveCursor,
+                                Qt.CursorShape.DragCopyCursor,
+                                Qt.CursorShape.DragLinkCursor,
+                            ]
+                            if cursor_shape in drag_cursors:
+                                print("Fallback: File drag detected via cursor!")
+                                self.dragging = True
+                                self.drag_started.emit()
+                else:
+                    if self.dragging:
+                        print("Fallback: File drag ended!")
+                        self.dragging = False
+                        self.drag_ended.emit()
+        except Exception as e:
+            print(f"Error in fallback drag detection: {e}")
+
+    def get_current_time(self):
+        """Get current time in seconds"""
+        import time
+        return time.time()
+
+    def stop_monitoring(self):
+        """Stop monitoring for global drag operations"""
+        self.monitoring = False
+        self.drag_check_timer.stop()
+        self.quit()
+
 def calculate_size(file_path):
     """Calculate file size of local file"""
     try:
@@ -22,63 +155,11 @@ def calculate_size(file_path):
         print(f"Error calculating size for {file_path}: {e}")
         return -1
 
-class ToggleButton(QWidget):
-    """Custom button widget for hiding/showing the shelf window"""
-    clicked = pyqtSignal()
-    
-    def __init__(self, parent=None, expanded=True):
-        super().__init__(parent)
-        self.setFixedWidth(12)
-        self.expanded = expanded
-        self.setToolTip("Click to hide shelf" if expanded else "Click to show shelf")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        # Set background color
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(40, 40, 40, 200))
-        painter.drawRect(0, 0, self.width(), self.height())
-        
-        # Draw arrow icon in the middle of the button
-        painter.setPen(QColor(200, 200, 200))
-        painter.setBrush(QColor(200, 200, 200))
-        
-        # Draw left or right-facing arrow based on expanded state
-        arrow_width = 6
-        arrow_height = 10
-        x = (self.width() - arrow_width) // 2
-        y = (self.height() - arrow_height) // 2
-        
-        path = QPainterPath()
-        if self.expanded:
-            # Right-facing arrow (hide)
-            path.moveTo(x, y)
-            path.lineTo(x + arrow_width, y + arrow_height // 2)
-            path.lineTo(x, y + arrow_height)
-        else:
-            # Left-facing arrow (show)
-            path.moveTo(x + arrow_width, y)
-            path.lineTo(x, y + arrow_height // 2)
-            path.lineTo(x + arrow_width, y + arrow_height)
-        
-        path.closeSubpath()
-        painter.drawPath(path)
-    
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-            self.expanded = not self.expanded
-            self.setToolTip("Click to hide shelf" if self.expanded else "Click to show shelf")
-            self.update()
-
 class FileItem(QWidget):
     """Widget representing a file/folder on the shelf with actions"""
     remove_requested = pyqtSignal(str)
     cloud_upload_requested = pyqtSignal(str)
-    
+
     def __init__(self, file_path, parent=None):
         super().__init__(parent)
         self.parent = parent
@@ -91,36 +172,36 @@ class FileItem(QWidget):
         normalized_file_path = os.path.normpath(self.file_path)
         self.file_name = os.path.basename(normalized_file_path)
         self.is_directory = os.path.exists(self.file_path) and os.path.isdir(self.file_path)
-        
+
         # Main widget setup
         self.setFixedSize(85, 130)
         self.setToolTip(self.file_name)
         self.setAcceptDrops(True)
-        
+
         # Create layouts
         layout = QVBoxLayout(self)
-        
+
         # Set consistent width for all elements
         self.element_width = 80
-        
+
         # Preview display
         self.preview_container = QWidget()
         self.preview_container.setFixedSize(self.element_width, 64)
         preview_layout = QHBoxLayout(self.preview_container)
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(0)
-        
+
         # Create a label to display the preview
         self.preview_label = QLabel()
         self.preview_label.setFixedSize(self.element_width, 64)
         self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setScaledContents(True)
-        
+
         # Set the preview based on file status
         self.update_preview()
-        
+
         preview_layout.addWidget(self.preview_label)
-        
+
         # File name label
         name_label = QLabel()
         name_label.setFixedWidth(self.element_width)
@@ -137,14 +218,14 @@ class FileItem(QWidget):
         name_label.setText(display_name)
         print(f"File name: {self.file_name}, Display name: {display_name}, is_directory: {self.is_directory}")
         name_label.setToolTip(self.file_name)  # Show full name in tooltip
-        
+
         # Top buttons layout with fixed width container
         button_container = QWidget()
         button_container.setFixedWidth(self.element_width)
         top_button_layout = QHBoxLayout(button_container)
         top_button_layout.setContentsMargins(0, 0, 0, 0)
         top_button_layout.setSpacing(2)
-        
+
         style = QApplication.instance().style()
         # Reveal in Finder/Explorer button
         self.reveal_btn = QPushButton()
@@ -164,7 +245,7 @@ class FileItem(QWidget):
             }
         """)
         self.reveal_btn.clicked.connect(self.open_in_explorer)
-        
+
         # Remove button
         self.remove_btn = QPushButton()
         trash_icon = QStyle.StandardPixmap.SP_DockWidgetCloseButton  # Use the StandardPixmap enumeration
@@ -183,7 +264,7 @@ class FileItem(QWidget):
             }
         """)
         self.remove_btn.clicked.connect(lambda: self.remove_requested.emit(self.file_path))
-        
+
         # cloud upload button
         self.cloud_upload_button = QPushButton()
         upload_icon = QStyle.StandardPixmap.SP_ArrowUp  # Use the StandardPixmap enumeration
@@ -230,14 +311,14 @@ class FileItem(QWidget):
         top_button_layout.addWidget(self.cloud_download_button)
         # Add stretch to ensure buttons are aligned left
         top_button_layout.addStretch()
-        
+
         # Add widgets to layout with proper spacing and alignment
         layout.addWidget(button_container, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.preview_container, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(4)
         layout.setContentsMargins(2, 2, 2, 2)
-        
+
         # Enable mouse tracking for hover effects
         self.setMouseTracking(True)
         self.setStyleSheet("""        
@@ -253,11 +334,11 @@ class FileItem(QWidget):
                 border-color: rgba(0, 0, 0, 0.2);
             }
         """)
-        
+
         # Initialize the preview
         self.update_preview()
         self.update_status()
-        
+
         # Cloud download function (placeholder - implementation needed)
     def download_file_from_s3(self, file_path):
         """Download a file from S3 bucket to local downloads folder"""
@@ -335,7 +416,7 @@ class FileItem(QWidget):
             self.render_server_files()
         else:
             print(f"S3 file key {s3_file_key} not found in server_files.")
-        
+
     def open_in_explorer(self):
         """Open file in system file explorer"""
         if os.path.exists(self.file_path):
@@ -346,8 +427,8 @@ class FileItem(QWidget):
                     subprocess.run(['open', '-R', self.file_path])
                 else:
                     subprocess.run(['xdg-open', os.path.dirname(self.file_path)])
-    
-    
+
+
     def update_status(self):
         # updates top row of buttons based on status
         print(f"Updating status for {self.file_path}: {self.status}")
@@ -371,67 +452,67 @@ class FileItem(QWidget):
             self.remove_btn.show()
             self.cloud_upload_button.show()
             self.cloud_download_button.show()
-        
+
         # Update the preview based on the status
         self.update_preview()
-        
+
     def update_file_status(self, status, cloud_size=None):
         """Update file status and cloud size"""
         self.status = status
-        
+
         self.update_status()
         self.update_preview()
-        
+
 
     def mousePressEvent(self, event: QMouseEvent):
         """Handle mouse press to start drag operation"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_position = event.pos()
-    
+
     # New signal for drag completion
     file_dragged_out = pyqtSignal(str)
-    
+
     def mousePressEvent(self, event: QMouseEvent):
         """Handle mouse press to start drag operation"""
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_position = event.pos()
-    
+
     # New signal for drag completion
     file_dragged_out = pyqtSignal(str)
-    
+
     def mouseMoveEvent(self, event: QMouseEvent):
         """Handle mouse move to perform drag operation"""
         if not (event.buttons() & Qt.MouseButton.LeftButton):
             return
-            
+
         # Check if drag threshold is met
         if (event.pos() - self.drag_start_position).manhattanLength() < QApplication.startDragDistance():
             return
-            
+
         # Start drag operation
         drag = QDrag(self)
         mime_data = QMimeData()
-        
+
         # Add URL to mime data
         url = QUrl.fromLocalFile(self.file_path)
         mime_data.setUrls([url])
-        
+
         # Set drag pixmap
         pixmap = self.grab()
         drag.setPixmap(pixmap)
         drag.setHotSpot(event.pos())
         drag.setMimeData(mime_data)
-        
+
         # Execute drag operation
         print(f"Starting drag operation for {self.file_path}")
         result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
         print(f"Drag completed with result: {result}")
-        
+
         # Always emit the signal when drag is completed
         # This ensures the file is always removed from shelf when dragged out
         self.file_dragged_out.emit(self.file_path)
         print(f"Emitted file_dragged_out signal for {self.file_path}")
-    
+
     def update_preview(self):
         """Update the preview based on file status"""
         pixmap = self.get_system_preview()
@@ -441,7 +522,7 @@ class FileItem(QWidget):
             border: 1px solid rgba(0, 0, 0, 0.2);
             border-radius: 5px;
         """)
-    
+
     def get_system_preview(self):
         """Get system preview for the file"""
         try:
@@ -457,17 +538,17 @@ class FileItem(QWidget):
                     pixmap = icon.pixmap(64, 64)
                     if not pixmap.isNull():
                         return pixmap
-                
+
                 # If extension doesn't work or no extension, use generic file icon
                 style = QApplication.instance().style()
                 generic_icon = style.standardIcon(QStyle.SP_FileIcon)
                 return generic_icon.pixmap(64, 64)
-            
+
             # Get system preview using QFileIconProvider
             icon_provider = QFileIconProvider()
             file_info = QFileInfo(self.file_path)
             icon = icon_provider.icon(file_info)
-            
+
             # Convert QIcon to QPixmap
             pixmap = icon.pixmap(64, 64)
             if pixmap.isNull():
@@ -491,7 +572,7 @@ class ShelfWindow(QMainWindow):
         self.overlay.resize(self.width(), self.height())
         self.overlay.move(0, 0)
         self.overlay.show()
-    
+
     def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
@@ -499,32 +580,38 @@ class ShelfWindow(QMainWindow):
         # We'll use parent.server_files instead of storing our own copy
         self.num_items = 0  # Centralized item count
         self.settings = self.load_settings() # Load settings here
-        
-        # Shelf state (expanded or collapsed)
-        self.is_expanded = True
-        self.collapsed_width = 12  # Width when collapsed
-        
-        # Edge button for show/hide (create this before init_ui)
-        self.toggle_button = ToggleButton(self, self.is_expanded)
-        self.toggle_button.clicked.connect(self.toggle_expansion)
-        
-        # Set animation for show/hide
-        self.expansion_animation = QPropertyAnimation(self, b"geometry")
-        self.expansion_animation.setDuration(250)  # 250ms animation
-        self.expansion_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
+
+        # Drag detection state
+        self.is_drag_active = False
+
+        # Visibility state tracking
+        self.is_shelf_visible = False
+
+        # Initialize global drag detector for Yoink-like behavior
+        self.global_drag_detector = GlobalDragDetector(self)
+        self.global_drag_detector.drag_started.connect(self.on_global_drag_started)
+        self.global_drag_detector.drag_ended.connect(self.on_global_drag_ended)
+        self.global_drag_detector.start()
+
+        # Transparency animation
+        self.opacity_animation = QPropertyAnimation(self, b"windowOpacity")
+        self.opacity_animation.setDuration(200)
+        self.opacity_animation.setEasingCurve(QEasingCurve.Type.OutQuad)
+
         # Initialize UI components
         self.init_ui()
-        
+
         self.setAcceptDrops(True)
-        self.show()  # Start visible
-        self.raise_()  # Bring to front
+
+        # Start hidden
+        self.hide()
+
         self.cloud_upload_enabled = self.settings.get("s3_enabled", False) # Load s3 enabled state
         self.cloud_upload_buttons = []  # Initialize buttons list
         print(f"settings: {self.settings}")
         print(f"Cloud upload enabled: {self.cloud_upload_enabled}")
         self.toggle_cloud_upload_button(self.cloud_upload_enabled) # Set initial button state
-        
+
         # Create overlay label
         self.overlay = QLabel("", self.centralWidget())
         self.overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -540,42 +627,31 @@ class ShelfWindow(QMainWindow):
         opacity.setOpacity(0.7)
         self.overlay.setGraphicsEffect(opacity)
         self.overlay.raise_()
-        
-        # Make sure toggle button is in front
-        self.update_toggle_button_position()
-        
+
         # Fetch server files on initialization if S3 is enabled
         if self.cloud_upload_enabled:
             self.fetch_server_files()
             self.render_server_files()
-    
+
     def init_ui(self):
         self.setWindowTitle("Dropp - File Shelf")
         self.set_window_flags(always_on_top=True)
-        
+
         # Set background to semi-transparent dark color
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # Set initial size for 1 file
-        self.item_width = 80
-        self.item_spacing = 10
-        self.window_margin = 40
-        initial_width = self.window_margin
-        self.num_items = 0  # Initialize item count
-        
-        self.setFixedHeight(180)
-        self.setMinimumWidth(initial_width)
-        self.setWindowOpacity(0.95)
-        
-        # Animation properties
-        self.animation = QPropertyAnimation(self, b"geometry")
-        self.animation.setDuration(200)  # 200ms animation
-        self.animation.setEasingCurve(QEasingCurve.Type.OutQuad)
-        
-        # Position at top-right near menu bar
+
+        # New fixed size and position
         screen = QApplication.primaryScreen().availableGeometry()
-        self.initial_x = screen.right() - initial_width
-        self.move(self.initial_x, screen.top() + 40)
-        
+        self.shelf_width = 350
+        self.shelf_height = 200
+        self.setGeometry(
+            screen.right() - self.shelf_width - 20, # position from right edge with margin
+            (screen.height() - self.shelf_height) // 2,
+            self.shelf_width,
+            self.shelf_height
+        )
+        self.setMinimumSize(self.shelf_width, self.shelf_height)
+
         # Setup central widget with background
         central_widget = QWidget()
         central_widget.setObjectName("centralWidget")
@@ -583,115 +659,137 @@ class ShelfWindow(QMainWindow):
             #centralWidget {
             }
         """)
-        
+
         main_layout = QVBoxLayout(central_widget)
-        
+
         # Create scroll area for files
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
+
         # Container for file items
         self.files_container = QWidget()
         self.files_layout = QHBoxLayout(self.files_container)
         self.files_layout.setSpacing(5)
         self.files_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        
+
         scroll_area.setWidget(self.files_container)
         main_layout.addWidget(scroll_area)
-        
+
         self.setCentralWidget(central_widget)
-        self.update_window_width()
+
+    def on_global_drag_started(self):
+        """Handle global drag start event - immediately show window"""
+        print("Global drag detected - showing shelf immediately")
+        self.is_drag_active = True
+        self.set_shelf_visible(True)
+
+        # Bring window to front
+        self.raise_()
+        self.activateWindow()
+
+
+
+    def on_global_drag_ended(self):
+        """Handle global drag end event - hide window if appropriate"""
+        print("Global drag ended")
+        self.is_drag_active = False
+        # Hide if mouse is not over the shelf and shelf is empty
+        # Use a small delay to allow for any final drop operations
+        if not self.underMouse() and self.num_items == 0:
+            print("Hiding shelf: drag ended, mouse not over shelf, shelf empty")
+            QTimer.singleShot(200, lambda: self.set_shelf_visible(False) if not self.is_drag_active and self.num_items == 0 else None)
+
+    def closeEvent(self, event):
+        """Clean up resources when window is closed"""
+        if hasattr(self, 'global_drag_detector'):
+            self.global_drag_detector.stop_monitoring()
+            self.global_drag_detector.quit()
+            self.global_drag_detector.wait()
+        super().closeEvent(event)
     
-    def update_window_width(self):
-        """
-        Central method to update window width based on absolute metrics.
-        Uses the number of items to calculate the appropriate width.
-        """
-        if not self.is_expanded:
-            return self.collapsed_width
+    def set_shelf_visible(self, visible):
+        """Set window visibility with a fade animation."""
+        # Check if we're already in the desired state
+        if visible == self.is_shelf_visible:
+            print(f"Shelf already {'visible' if visible else 'hidden'} - skipping animation")
+            return
             
-        # Calculate exact width needed based on the absolute number of items
-        new_width = self.num_items * (self.item_width + self.item_spacing) + self.window_margin
+        # Update state tracking
+        self.is_shelf_visible = visible
         
-        # Calculate position to maintain right edge alignment
-        screen = QApplication.primaryScreen().availableGeometry()
-        new_x = screen.right() - new_width
-        
-        # Animate both size and position
-        self.animation.stop()
-        new_geometry = self.geometry()
-        new_geometry.setX(new_x)
-        new_geometry.setRight(new_x + new_width)
-        print(f"Screen width: {screen.width()}, new X: {new_x}, new width: {new_width}")
-        self.animation.setStartValue(self.geometry())
-        self.animation.setEndValue(new_geometry)
-        self.animation.start()
-        
-        return new_width
-    
-    def toggle_expansion(self):
-        """Toggle between expanded and collapsed state"""
-        self.is_expanded = not self.is_expanded
-        
-        screen = QApplication.primaryScreen().availableGeometry()
-        current_geometry = self.geometry()
-        
-        if self.is_expanded:
-            # Expanding: calculate width based on items
-            new_width = self.num_items * (self.item_width + self.item_spacing) + self.window_margin
-            if new_width < self.minimumWidth():
-                new_width = self.minimumWidth()
-            new_x = screen.right() - new_width
+        if visible:
+            self._in_visibility_animation = True
+            self.setWindowOpacity(0.0)
+            self.show()
+            self.opacity_animation.setStartValue(0.0)
+            self.opacity_animation.setEndValue(0.95)
+            self.opacity_animation.finished.connect(self._on_show_animation_finished)
+            self.opacity_animation.start()
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+            print("Shelf set to visible mode")
         else:
-            # Collapsing: use collapsed width
-            new_width = self.collapsed_width
-            new_x = screen.right() - new_width
-        
-        # Stop any running animations
-        self.expansion_animation.stop()
-        
-        # Set up new geometry maintaining right edge alignment
-        new_geometry = current_geometry
-        new_geometry.setX(new_x)
-        new_geometry.setRight(new_x + new_width)
-        
-        # Animate the transition
-        self.expansion_animation.setStartValue(current_geometry)
-        self.expansion_animation.setEndValue(new_geometry)
-        self.expansion_animation.start()
-        
-        # Update toggle button position
-        self.update_toggle_button_position()
+            # Disconnect any previous connection to avoid multiple hides
+            try:
+                self.opacity_animation.finished.disconnect()
+            except TypeError:
+                pass  # No connection to disconnect
+            self._in_visibility_animation = True
+            self.opacity_animation.setStartValue(self.windowOpacity())
+            self.opacity_animation.setEndValue(0.0)
+            self.opacity_animation.finished.connect(self._on_hide_animation_finished)
+            self.opacity_animation.start()
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            print("Shelf set to hidden mode")
     
-    def resizeEvent(self, event):
-        """Handle resize events to update toggle button position"""
-        super().resizeEvent(event)
-        self.update_toggle_button_position()
-        
-    def update_toggle_button_position(self):
-        """Update the position of the toggle button on the left edge"""
-        self.toggle_button.setGeometry(0, 0, self.toggle_button.width(), self.height())
-        self.toggle_button.raise_()
+    def _on_show_animation_finished(self):
+        """Called when show animation completes"""
+        if hasattr(self, '_in_visibility_animation'):
+            delattr(self, '_in_visibility_animation')
     
+    def _on_hide_animation_finished(self):
+        """Called when hide animation completes"""
+        # State is already set to False in set_shelf_visible
+        if hasattr(self, '_in_visibility_animation'):
+            delattr(self, '_in_visibility_animation')
+    
+    def hide(self):
+        """Override hide to keep state synchronized"""
+        super().hide()
+        self.is_shelf_visible = False
+        
+    def show(self):
+        """Override show to keep state synchronized"""
+        super().show()
+        # Only update state if this isn't part of the animation sequence
+        if not hasattr(self, '_in_visibility_animation'):
+            self.is_shelf_visible = True
+
+    
+
     def dragEnterEvent(self, event: QDragEnterEvent):
+        """Handle drag enter events"""
         if event.mimeData().hasUrls():
             self.showOverlay()
-            # Auto-expand if window is collapsed
-            if not self.is_expanded:
-                self.toggle_expansion()
-                self.toggle_button.expanded = True
-                self.toggle_button.setToolTip("Click to hide shelf")
-                self.toggle_button.update()
             self.overlay.raise_()
             event.acceptProposedAction()
     
+    def leaveEvent(self, event):
+        """Hide the shelf when the mouse leaves, if no drag is active and shelf is empty"""
+        if not self.is_drag_active and self.num_items == 0:
+            print("Hiding shelf: mouse left shelf, no drag active, shelf empty")
+            self.set_shelf_visible(False)
+        super().leaveEvent(event)
+
     def dragLeaveEvent(self, event):
+        """Handle drag leave events"""
         self.overlay.hide()
-    
+        # Don't immediately hide shelf - let timer handle it
+
     def dropEvent(self, event: QDropEvent):
+        """Handle drop events"""
         urls = event.mimeData().urls()
         for url in urls:
             file_path = url.toLocalFile()
@@ -700,150 +798,22 @@ class ShelfWindow(QMainWindow):
         
         self.overlay.hide()
         event.acceptProposedAction()
-    
-    def add_file_to_shelf(self, file_path):
-        """Add a file to the shelf"""
-        # If shelf is collapsed, expand it first
-        if not self.is_expanded:
-            self.toggle_expansion()
-        
-        filename = os.path.basename(file_path)
-        
-        # Check if file already exists on shelf
-        if filename in self.stored_files:
-            # Find and return the existing file item
-            for i in range(self.files_layout.count()):
-                widget = self.files_layout.itemAt(i).widget()
-                if isinstance(widget, FileItem) and widget.file_path == file_path:
-                    return widget
-            return None
-        
-        # Add file to storage
-        self.stored_files.append(filename)
-        
-        # Create file item widget
-        file_item = FileItem(file_path, parent=self)
-        file_item.cloud_upload_button.setVisible(self.cloud_upload_enabled)
-        self.cloud_upload_buttons.append(file_item.cloud_upload_button)
-        file_item.remove_requested.connect(self.remove_file_from_shelf)
-        file_item.file_dragged_out.connect(self.remove_file_from_shelf)
-        file_item.cloud_upload_requested.connect(self.upload_file_to_s3)
-        self.files_layout.addWidget(file_item)
-        
-        # Update item count and window width
-        self.num_items += 1
-        self.update_window_width()
-        
-        return file_item
-    
-    def remove_file_from_shelf(self, file_path):
-        """Remove a file from the shelf"""
-        # Find the file widget first to check its status
-        print(f"Attempting to remove {file_path} from shelf...")
-        file_widget = None
-        for i in range(self.files_layout.count()):
-            widget = self.files_layout.itemAt(i).widget()
-            if isinstance(widget, FileItem) and widget.file_path == file_path:
-                file_widget = widget
-                break
-        if file_widget != None:
-            print(f"File widget found: {file_widget}")
-        
-        # If file has cloud status, delete from S3
-        if file_widget and file_widget.status in ["cloud", "both", "mismatch"]:
-            self.delete_file_from_s3(file_path, file_widget)
-            print(f"Deleting cloud file: {file_widget} ({file_path})")
-            
-        print(f'noncloudfile for {file_widget}: {file_widget.file_path} found =[ {file_path} ] ...')
-        # Clean now
-        if file_path in self.stored_files:
-            filename = os.path.basename(file_path)
-            self.stored_files.remove(filename)
-            
-            # Find and remove the corresponding widget
-            print(f"Widget count: {self.files_layout.count()}")
-            for i in range(self.files_layout.count()):
-                widget = self.files_layout.itemAt(i).widget()
-                if isinstance(widget, FileItem) and widget.file_path == file_path:
-                    print(f'deleting {widget} fromshelf')
 
-                    widget.deleteLater()
-                    self.files_layout.removeWidget(widget)
-                    break
-
-        print(f'noncloudfile for {file_widget}: {file_widget.file_path} found =[ {file_path} ] cleared ...')
-
-        # Update item count and window width
-        self.num_items -= 1
-        self.update_window_width()
-    
-    def delete_file_from_s3(self, file_path, file_widget):
-        """Delete a file from S3 bucket"""
-        print(f"Deleting file from S3: {file_path}")
-        s3_settings = self.load_settings()
-        if not s3_settings.get("s3_enabled"):
-            print("S3 is not enabled in settings.")
-            return
-        
-        bucket_name = s3_settings.get("s3_bucket_name")
-        access_key = s3_settings.get("aws_access_key")
-        secret_key = s3_settings.get("aws_secret_key")
-        region = s3_settings.get("aws_region")
-        
-        if not all([bucket_name, access_key, secret_key, region]):
-            print("Missing S3 settings. Please check settings dialog.")
-            return
-        
-        try:
-            s3 = boto3.client('s3',
-                            aws_access_key_id=access_key,
-                            aws_secret_access_key=secret_key,
-                            region_name=region,
-                            endpoint_url=self.settings.get("s3_gateway_url") or None)
-            
-            # Get the file name for S3
-            file_name = os.path.basename(file_path)
-            
-            # Delete the file from S3
-            s3.delete_object(Bucket=bucket_name, Key=file_name)
-            print(f"Successfully deleted {file_name} from S3 bucket {bucket_name}")
-            
-            # Update parent.server_files by removing the file
-            if hasattr(self.parent, 'server_files') and file_name in self.parent.server_files:
-                del self.parent.server_files[file_name]
-                # Save updated server files to disk
-                self.parent.flush_server_files()
-                
-        except Exception as e:
-            print(f"Error deleting from S3: {e}")
+        # Reset drag state after successful drop
+        self.is_drag_active = False
+        # Note: Don't hide immediately - let leaveEvent handle it if mouse leaves
+        # This allows user to see the result and potentially add more files
+        print(f"Drop completed. Shelf now has {self.num_items} items")
 
     def paintEvent(self, event):
-        """Custom paint event to create rounded corners and border on all sides except right"""
+        """Custom paint event to create rounded corners"""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         # Set the window background
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(50, 50, 50, 230))  # Semi-transparent light gray
-        # painter.drawRoundedRect(self.rect(), 10, 10)
-        
-        # Draw border on all sides except right
-        
-        # Left border (not drawn when collapsed)
-        if self.is_expanded:
-            painter.drawLine(0, 10, 0, self.height() - 10)
-        
-        # Top border (with rounded corners)
-        path = QPainterPath()
-        path.moveTo(10, 0)
-        path.lineTo(self.width() - 10, 0)
-        painter.drawPath(path)
-        
-        # Bottom border (with rounded corners)
-        path = QPainterPath()
-        path.moveTo(10, self.height() - 1)
-        path.lineTo(self.width() - 10, self.height() - 1)
-        painter.drawPath(path)
+        painter.setBrush(QColor(50, 50, 50, 230))  # Semi-transparent dark gray
+        painter.drawRoundedRect(self.rect(), 10, 10)
 
     def set_window_flags(self, always_on_top=True):
         """Set window flags with optional always-on-top behavior"""
@@ -1112,3 +1082,115 @@ class ShelfWindow(QMainWindow):
             with open(SETTINGS_FILE, "r") as f:
                 return json.load(f)
         return {}
+
+    def add_file_to_shelf(self, file_path):
+        """Add a file to the shelf"""
+        filename = os.path.basename(file_path)
+
+        # Check if file already exists on shelf
+        if filename in self.stored_files:
+            # Find and return the existing file item
+            for i in range(self.files_layout.count()):
+                widget = self.files_layout.itemAt(i).widget()
+                if isinstance(widget, FileItem) and widget.file_path == file_path:
+                    return widget
+            return None
+
+        # Add file to storage
+        self.stored_files.append(filename)
+
+        # Create file item widget
+        file_item = FileItem(file_path, parent=self)
+        file_item.cloud_upload_button.setVisible(self.cloud_upload_enabled)
+        self.cloud_upload_buttons.append(file_item.cloud_upload_button)
+        file_item.remove_requested.connect(self.remove_file_from_shelf)
+        file_item.file_dragged_out.connect(self.remove_file_from_shelf)
+        file_item.cloud_upload_requested.connect(self.upload_file_to_s3)
+        self.files_layout.addWidget(file_item)
+
+        # Update item count
+        self.num_items += 1
+
+        return file_item
+
+    def remove_file_from_shelf(self, file_path):
+        """Remove a file from the shelf"""
+        # Find the file widget first to check its status
+        print(f"Attempting to remove {file_path} from shelf...")
+        file_widget = None
+        for i in range(self.files_layout.count()):
+            widget = self.files_layout.itemAt(i).widget()
+            if isinstance(widget, FileItem) and widget.file_path == file_path:
+                file_widget = widget
+                break
+        if file_widget != None:
+            print(f"File widget found: {file_widget}")
+
+        # If file has cloud status, delete from S3
+        if file_widget and file_widget.status in ["cloud", "both", "mismatch"]:
+            self.delete_file_from_s3(file_path, file_widget)
+            print(f"Deleting cloud file: {file_widget} ({file_path})")
+
+        print(f'noncloudfile for {file_widget}: {file_widget.file_path} found =[ {file_path} ] ...')
+        # Clean now
+        filename = os.path.basename(file_path)
+        if filename in self.stored_files:
+            self.stored_files.remove(filename)
+
+            # Find and remove the corresponding widget
+            print(f"Widget count: {self.files_layout.count()}")
+            for i in range(self.files_layout.count()):
+                widget = self.files_layout.itemAt(i).widget()
+                if isinstance(widget, FileItem) and widget.file_path == file_path:
+                    print(f'deleting {widget} fromshelf')
+                    widget.deleteLater()
+                    self.files_layout.removeWidget(widget)
+                    break
+
+        print(f'noncloudfile for {file_widget}: {file_widget.file_path} found =[ {file_path} ] cleared ...')
+
+        # Update item count
+        self.num_items -= 1
+        # Removed: Immediate hiding when num_items == 0
+        # Let leaveEvent and on_global_drag_ended handle visibility based on context
+        print(f"File removed. Shelf now has {self.num_items} items")
+
+    def delete_file_from_s3(self, file_path, file_widget):
+        """Delete a file from S3 bucket"""
+        print(f"Deleting file from S3: {file_path}")
+        s3_settings = self.load_settings()
+        if not s3_settings.get("s3_enabled"):
+            print("S3 is not enabled in settings.")
+            return
+
+        bucket_name = s3_settings.get("s3_bucket_name")
+        access_key = s3_settings.get("aws_access_key")
+        secret_key = s3_settings.get("aws_secret_key")
+        region = s3_settings.get("aws_region")
+
+        if not all([bucket_name, access_key, secret_key, region]):
+            print("Missing S3 settings. Please check settings dialog.")
+            return
+
+        try:
+            s3 = boto3.client('s3',
+                            aws_access_key_id=access_key,
+                            aws_secret_access_key=secret_key,
+                            region_name=region,
+                            endpoint_url=self.settings.get("s3_gateway_url") or None)
+
+            # Get the file name for S3
+            file_name = os.path.basename(file_path)
+
+            # Delete the file from S3
+            s3.delete_object(Bucket=bucket_name, Key=file_name)
+            print(f"Successfully deleted {file_name} from S3 bucket {bucket_name}")
+
+            # Update parent.server_files by removing the file
+            if hasattr(self.parent, 'server_files') and file_name in self.parent.server_files:
+                del self.parent.server_files[file_name]
+                # Save updated server files to disk
+                self.parent.flush_server_files()
+
+        except Exception as e:
+            print(f"Error deleting from S3: {e}")
