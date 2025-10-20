@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
@@ -70,6 +71,16 @@ def _clerk_service() -> ClerkAuthService:
 @api_bp.get("/healthz")
 def healthcheck() -> Dict[str, Any]:
     return {"status": "ok"}
+
+
+@api_bp.get("/")
+def homepage() -> Response:
+    return render_template(
+        "home.html",
+        login_url=url_for("api.login_portal"),
+        github_url="https://github.com/spacefarers/Dropp/",
+        current_year=datetime.utcnow().year,
+    )
 
 
 @api_bp.get("/login/")

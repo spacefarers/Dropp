@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Dropp – Frictionless Cross-Platform Dropzone</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: radial-gradient(circle at 20% 20%, rgba(30, 64, 175, 0.45), transparent 55%), radial-gradient(circle at 80% 10%, rgba(147, 51, 234, 0.35), transparent 60%), #020617;
+        --primary: #38bdf8;
+        --secondary: #c084fc;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: clamp(1.5rem, 3vw, 3rem) clamp(1.5rem, 6vw, 6rem);
+        gap: 1.5rem;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .brand-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--primary), var(--secondary));
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+      }
+      .brand-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
+      .header-links a {
+        color: var(--muted);
+        text-decoration: none;
+        font-weight: 500;
+        transition: color 0.2s ease;
+        margin-left: 1.5rem;
+      }
+      .header-links a:hover {
+        color: var(--text);
+      }
+      main {
+        flex: 1;
+        display: grid;
+        place-items: center;
+        padding: clamp(1.5rem, 5vw, 7rem) clamp(1.5rem, 6vw, 7rem);
+      }
+      .hero {
+        max-width: 1100px;
+        width: 100%;
+        display: grid;
+        gap: clamp(2rem, 3vw, 3.5rem);
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        align-items: center;
+      }
+      .hero h1 {
+        font-size: clamp(2.4rem, 4vw, 3.75rem);
+        margin: 0;
+        line-height: 1.1;
+      }
+      .hero p {
+        font-size: clamp(1.05rem, 1.5vw, 1.2rem);
+        color: var(--muted);
+        margin: 1.2rem 0 2rem;
+        line-height: 1.6;
+      }
+      .cta-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.9rem 1.6rem;
+        border-radius: 999px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        cursor: pointer;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, rgba(56, 189, 248, 0.95), rgba(129, 140, 248, 0.95));
+        color: #0f172a;
+        box-shadow: 0 20px 40px rgba(56, 189, 248, 0.25);
+      }
+      .btn-primary:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 25px 45px rgba(56, 189, 248, 0.35);
+      }
+      .btn-secondary {
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        color: var(--text);
+      }
+      .btn-secondary:hover {
+        border-color: rgba(148, 163, 184, 0.6);
+      }
+      .feature-card {
+        position: relative;
+        background: rgba(15, 23, 42, 0.5);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 18px;
+        padding: clamp(1.8rem, 3vw, 2.4rem);
+        box-shadow: 0 25px 40px rgba(15, 23, 42, 0.55);
+        backdrop-filter: blur(18px);
+        overflow: hidden;
+      }
+      .feature-card::after {
+        content: "";
+        position: absolute;
+        top: -20%;
+        right: -10%;
+        width: 220px;
+        height: 220px;
+        border-radius: 50%;
+        background: rgba(56, 189, 248, 0.08);
+        filter: blur(10px);
+      }
+      .feature-grid {
+        display: grid;
+        gap: 1.4rem;
+      }
+      .feature {
+        display: flex;
+        gap: 1rem;
+        align-items: flex-start;
+      }
+      .feature-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        background: rgba(56, 189, 248, 0.15);
+        display: grid;
+        place-items: center;
+        font-size: 1.1rem;
+        color: var(--primary);
+      }
+      .feature-title {
+        margin: 0 0 0.25rem;
+        font-weight: 600;
+      }
+      footer {
+        padding: 1.5rem clamp(1.5rem, 6vw, 6rem);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      footer a {
+        color: var(--muted);
+        text-decoration: none;
+      }
+      footer a:hover {
+        color: var(--text);
+      }
+      @media (max-width: 640px) {
+        header {
+          flex-direction: column;
+        }
+        .header-links {
+          width: 100%;
+          display: flex;
+          justify-content: center;
+          gap: 1.5rem;
+        }
+        footer {
+          flex-direction: column;
+          text-align: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <div class="brand-icon">DR</div>
+        <span class="brand-title">Dropp</span>
+      </div>
+      <nav class="header-links">
+        <a href="{{ login_url }}">Sign in</a>
+        <a href="{{ github_url }}" rel="noopener" target="_blank">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <h1>Your cross-platform dropzone HQ.</h1>
+          <p>
+            Dropp keeps your files and snippets within reach across macOS, Windows,
+            and the web. Park anything in the cloud-backed dropzone, then drag,
+            share, or transfer between devices without breaking flow.
+          </p>
+          <div class="cta-group">
+            <a class="btn btn-primary" href="{{ login_url }}">Open Dropp</a>
+            <a class="btn btn-secondary" href="{{ github_url }}" rel="noopener" target="_blank">View on GitHub</a>
+          </div>
+        </div>
+
+        <aside class="feature-card" aria-label="Feature highlights">
+          <div class="feature-grid">
+            <article class="feature">
+              <div class="feature-icon">⇅</div>
+              <div>
+                <h3 class="feature-title">Drag &amp; Drop Anywhere</h3>
+                <p>Pin files, links, and text snippets in a unified dropzone synced across all your devices.</p>
+              </div>
+            </article>
+            <article class="feature">
+              <div class="feature-icon">☁</div>
+              <div>
+                <h3 class="feature-title">Cloud Transfer</h3>
+                <p>Send large files effortlessly through Dropp's transfer pipeline—no USB drives, no email attachments.</p>
+              </div>
+            </article>
+            <article class="feature">
+              <div class="feature-icon">⚡</div>
+              <div>
+                <h3 class="feature-title">Fast &amp; Secure</h3>
+                <p>Backed by Clerk authentication, Vercel Blob storage, and MongoDB for a responsive, reliable workflow.</p>
+              </div>
+            </article>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <footer>
+      <span>© {{ current_year }} Dropp. Built for makers on every platform.</span>
+      <a href="{{ github_url }}" rel="noopener" target="_blank">github.com/spacefarers/Dropp</a>
+    </footer>
+  </body>
+</html>

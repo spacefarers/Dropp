@@ -72,7 +72,8 @@
           return;
         }
 
-        await Clerk.load({ publishableKey });
+        const clerk = new Clerk(publishableKey);
+        await clerk.load();
 
         const signInElement = document.getElementById("sign-in");
         const statusElement = document.getElementById("status");
@@ -95,7 +96,7 @@
           if (finalizing || finalized) {
             return;
           }
-          const session = Clerk.session;
+          const session = clerk.session;
           if (!session) {
             return;
           }
@@ -137,19 +138,19 @@
         };
 
         const mountSignIn = () => {
-          Clerk.mountSignIn(signInElement, {
+          clerk.mountSignIn(signInElement, {
             redirectUrl: window.location.href,
             afterSignInUrl: window.location.href,
           });
         };
 
-        if (Clerk.user && Clerk.session) {
+        if (clerk.user && clerk.session) {
           await finalizeSession();
         } else {
           mountSignIn();
         }
 
-        Clerk.addListener(async ({ user, session }) => {
+        clerk.addListener(async ({ user, session }) => {
           if (user && session) {
             await finalizeSession();
           }
