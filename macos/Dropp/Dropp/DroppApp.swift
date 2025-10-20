@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import QuartzCore
 
 final class FileDragStartObserver {
     private var monitors: [Any] = []
@@ -66,6 +67,8 @@ final class FileDragStartObserver {
 final class WindowVisibilityController {
     private weak var window: NSWindow?
     private(set) var isVisible: Bool = false
+    private var shouldOrderOutAfterFade = false
+    private let animationDuration: TimeInterval = 0.2
 
     func attach(window: NSWindow) {
         self.window = window
@@ -73,6 +76,7 @@ final class WindowVisibilityController {
     }
 
     func setVisible(_ visible: Bool) {
+        if visible == isVisible { return }
         DispatchQueue.main.async {
             guard let window = self.window else {
                 NSLog("WindowVisibilityController has no window to \(visible ? "show" : "hide")")
@@ -80,11 +84,40 @@ final class WindowVisibilityController {
             }
 
             if visible {
+                self.shouldOrderOutAfterFade = false
                 WindowLayout.applySizeAndPosition(window)
                 NSApp.activate(ignoringOtherApps: true)
+
+                if !window.isVisible {
+                    window.alphaValue = 0
+                }
                 window.makeKeyAndOrderFront(nil)
+
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = self.animationDuration
+                    context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    window.animator().alphaValue = 1
+                }
             } else {
-                window.orderOut(nil)
+                if !window.isVisible {
+                    window.orderOut(nil)
+                    window.alphaValue = 1
+                } else {
+                    self.shouldOrderOutAfterFade = true
+
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = self.animationDuration
+                        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                        window.animator().alphaValue = 0
+                    } completionHandler: { [weak self, weak window] in
+                        guard let self = self, let window = window else { return }
+                        if self.shouldOrderOutAfterFade {
+                            window.orderOut(nil)
+                            window.alphaValue = 1
+                            self.shouldOrderOutAfterFade = false
+                        }
+                    }
+                }
             }
 
             self.isVisible = visible
@@ -100,8 +133,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let visibilityController = WindowVisibilityController()
     private var mainWindow: NSWindow?
     private var notificationTokens: [NSObjectProtocol] = []
+    private var skipNextActivationUpdate = false
+    private var isDraggingFiles = false
+    private var hasShownDiskAccessAlert = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        promptForDiskAccessIfNeeded()
+
         let rootView = ContentView()
             .environmentObject(shelf)
 
@@ -124,6 +162,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         wireDragCallbacks()
         installObservers()
+
+        // Surface the window immediately on launch.
+        showWindowSuppressingActivationUpdate()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -133,16 +174,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // Prevent showing windows when clicking the dock icon
-        false
+        promptForDiskAccessIfNeeded()
+        showWindowSuppressingActivationUpdate()
+        return true
     }
 
     private func wireDragCallbacks() {
         fileDragObserver.onFileDragStart = { [weak self] _ in
-            self?.visibilityController.setVisible(true)
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.isDraggingFiles = true
+                self.showWindowSuppressingActivationUpdate()
+            }
         }
         fileDragObserver.onFileDragEnd = { [weak self] _ in
-            self?.visibilityController.setVisible(false)
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.isDraggingFiles = false
+                // Allow the drop callback to finish mutating the shelf before evaluating.
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                self.updateVisibilityBasedOnShelf()
+            }
         }
         fileDragObserver.start()
     }
@@ -171,6 +223,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 WindowLayout.applySizeAndPosition(window)
             }
         )
+
+        notificationTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.handleApplicationBecameActive()
+            }
+        )
+
+        notificationTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: NSApplication.didResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.updateVisibilityBasedOnShelf()
+            }
+        )
+    }
+
+    private func updateVisibilityBasedOnShelf() {
+        if isDraggingFiles {
+            return
+        }
+        if shelf.items.isEmpty {
+            visibilityController.setVisible(false)
+        } else {
+            visibilityController.setVisible(true)
+        }
+    }
+
+    private func handleApplicationBecameActive() {
+        if skipNextActivationUpdate {
+            skipNextActivationUpdate = false
+            return
+        }
+        updateVisibilityBasedOnShelf()
+    }
+
+    private func showWindowSuppressingActivationUpdate() {
+        skipNextActivationUpdate = true
+        visibilityController.setVisible(true)
+    }
+
+    private func promptForDiskAccessIfNeeded() {
+        guard !hasShownDiskAccessAlert else { return }
+        guard !DiskAccessController.shared.isAccessGranted() else { return }
+        hasShownDiskAccessAlert = true
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Dropp Needs Full Disk Access"
+        alert.informativeText = "Dropp can only pin and move your files if Full Disk Access is enabled. Without it, the shelf cannot stay in sync."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            DiskAccessController.shared.requestAccess()
+        }
     }
 }
 
@@ -189,7 +302,7 @@ struct DroppApp: App {
 }
 
 private enum WindowLayout {
-    static let targetSize = NSSize(width: 200, height: 400)
+    static let targetSize = NSSize(width: 170, height: 400)
 
     static func configure(_ window: NSWindow) {
         window.titleVisibility = .hidden
