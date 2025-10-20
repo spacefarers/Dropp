@@ -6,6 +6,11 @@ header {
   gap: 1.5rem;
 }
 
+.header-links {
+  display: flex;
+  align-items: center;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -28,16 +33,26 @@ header {
   font-weight: 600;
 }
 
-.header-links a {
+.header-link {
   color: var(--muted);
   text-decoration: none;
   font-weight: 500;
   transition: color 0.2s ease;
   margin-left: 1.5rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
 }
 
-.header-links a:hover {
+.header-link:hover,
+.header-link:focus-visible {
   color: var(--text);
+}
+
+.header-user {
+  margin-left: 1.5rem;
 }
 
 main {
@@ -190,7 +205,8 @@ footer a:hover {
     gap: 1.5rem;
   }
 
-  .header-links a {
+  .header-link,
+  .header-user {
     margin-left: 0;
   }
 

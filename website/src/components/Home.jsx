@@ -1,8 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import './Home.css'
 
-export default function Home() {
+export default function Home({ navAuth, primaryCta }) {
   const [currentYear] = useState(new Date().getFullYear())
+  const navContent = navAuth ?? (
+    <a className="header-link" href="/login">Sign in</a>
+  )
+  const primaryCallToAction = primaryCta !== undefined ? primaryCta : (
+    <a className="btn btn-primary" href="/login">Open Dropp</a>
+  )
 
   return (
     <>
@@ -12,8 +18,8 @@ export default function Home() {
           <span className="brand-title">Dropp</span>
         </div>
         <nav className="header-links">
-          <a href="/login">Sign in</a>
-          <a href="https://github.com/spacefarers/Dropp" rel="noopener noreferrer" target="_blank">GitHub</a>
+          {navContent}
+          <a className="header-link" href="https://github.com/spacefarers/Dropp" rel="noopener noreferrer" target="_blank">GitHub</a>
         </nav>
       </header>
 
@@ -27,7 +33,7 @@ export default function Home() {
               share, or transfer between devices without breaking flow.
             </p>
             <div className="cta-group">
-              <a className="btn btn-primary" href="/login">Open Dropp</a>
+              {primaryCallToAction}
               <a className="btn btn-secondary" href="https://github.com/spacefarers/Dropp" rel="noopener noreferrer" target="_blank">View on GitHub</a>
             </div>
           </div>

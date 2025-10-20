@@ -1,10 +1,13 @@
-import { ClerkProvider } from '@clerk/clerk-react'
 import { useEffect, useState } from 'react'
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+} from '@clerk/clerk-react'
 import Login from './components/Login'
 import Home from './components/Home'
-
-const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-const isClerkConfigured = Boolean(publishableKey)
 
 const resolvePageFromLocation = () => {
   if (typeof window === 'undefined') {
@@ -12,19 +15,6 @@ const resolvePageFromLocation = () => {
   }
 
   return window.location.pathname.startsWith('/login') ? 'login' : 'home'
-}
-
-function ClerkConfigurationNotice() {
-  return (
-    <div className="login-container">
-      <main className="login-card">
-        <h1>Welcome to Dropp</h1>
-        <p className="login-lead">
-          Authentication is not configured yet. Provide VITE_CLERK_PUBLISHABLE_KEY to enable sign-in.
-        </p>
-      </main>
-    </div>
-  )
 }
 
 function App() {
@@ -45,18 +35,51 @@ function App() {
     }
   }, [])
 
-  const content = currentPage === 'login'
-    ? (isClerkConfigured ? <Login /> : <ClerkConfigurationNotice />)
-    : <Home />
-
-  if (!isClerkConfigured) {
-    return content
+  if (currentPage === 'login') {
+    return (
+      <>
+        <SignedOut>
+          <Login />
+        </SignedOut>
+        <SignedIn>
+          <Login />
+        </SignedIn>
+      </>
+    )
   }
 
   return (
-    <ClerkProvider publishableKey={publishableKey}>
-      {content}
-    </ClerkProvider>
+    <>
+      <SignedOut>
+        <Home
+          navAuth={
+            <>
+              <SignInButton signInUrl="/login">
+                <button className="header-link" type="button">Sign in</button>
+              </SignInButton>
+              <SignUpButton signUpUrl="/login">
+                <button className="header-link" type="button">Create account</button>
+              </SignUpButton>
+            </>
+          }
+          primaryCta={
+            <SignInButton signInUrl="/login">
+              <button className="btn btn-primary" type="button">Open Dropp</button>
+            </SignInButton>
+          }
+        />
+      </SignedOut>
+      <SignedIn>
+        <Home
+          navAuth={(
+            <div className="header-user">
+              <UserButton afterSignOutUrl="/" />
+            </div>
+          )}
+          primaryCta={null}
+        />
+      </SignedIn>
+    </>
   )
 }
 

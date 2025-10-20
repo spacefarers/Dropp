@@ -124,8 +124,12 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             // Auth section
             if auth.isLoggedIn {
-                Label("Logged in as \(auth.username ?? "Unknown")", systemImage: "person.crop.circle.badge.checkmark")
-                    .foregroundStyle(Color.primary)
+                Button {
+                    isSettingsMenuPresented = false
+                    auth.logout()
+                } label: {
+                    Label("Sign out of \(auth.username ?? "Account")", systemImage: "rectangle.portrait.and.arrow.right")
+                }
             } else {
                 Button {
                     isSettingsMenuPresented = false
@@ -549,4 +553,3 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         .environmentObject(Shelf())
         .environmentObject(AuthManager.shared)
 }
-
