@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import boto3
 from flask import Flask
 from flask_cors import CORS
 from pymongo import MongoClient
@@ -18,8 +17,7 @@ def create_app(preconfigured: Config | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_mapping(
         SECRET_KEY=config.secret_key,
-        AWS_S3_BUCKET=config.aws_s3_bucket,
-        AWS_REGION=config.aws_region,
+        BLOB_READ_WRITE_TOKEN=config.blob_read_write_token,
         PRESIGN_TTL_SECONDS=config.presign_ttl_seconds,
         UPLOAD_POST_TTL_SECONDS=config.upload_post_ttl_seconds,
         GOOGLE_CLIENT_ID=config.google_client_id,
@@ -28,14 +26,10 @@ def create_app(preconfigured: Config | None = None) -> Flask:
         APP_REDIRECT_URI=config.app_redirect_uri,
     )
 
-    # Initialize Mongo and S3 clients and attach to the app for later reuse.
+    # Initialize Mongo client and attach to the app for later reuse.
     mongo_client = MongoClient(config.mongo_uri, tz_aware=True)
     app.mongo_client = mongo_client
     app.mongo_db = mongo_client[config.mongo_db]
-    app.s3_client = boto3.client(
-        "s3",
-        region_name=config.aws_region,
-    )
 
     CORS(app, supports_credentials=True)
     app.register_blueprint(api_bp)

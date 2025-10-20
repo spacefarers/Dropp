@@ -23,7 +23,7 @@ from .repository import (
     mark_upload_completed,
     record_upload_init,
 )
-from .storage import build_object_key, generate_download_url, generate_upload_post
+from .storage import build_blob_pathname, generate_client_upload_token
 
 api_bp = Blueprint("api", __name__)
 
@@ -103,32 +103,39 @@ def request_upload() -> Response:
         if size <= 0:
             abort(HTTPStatus.BAD_REQUEST, description="size must be positive")
 
-    s3_key = build_object_key(user_id, filename)
-    upload_spec = generate_upload_post(
-        s3_client=current_app.s3_client,
-        bucket=current_app.config["AWS_S3_BUCKET"],
-        key=s3_key,
-        content_type=content_type,
+    blob_pathname = build_blob_pathname(user_id, filename)
+    client_token = generate_client_upload_token(
+        pathname=blob_pathname,
         expires_in=current_app.config["UPLOAD_POST_TTL_SECONDS"],
-        max_content_length=size,
     )
 
     file_doc = record_upload_init(
         current_app.mongo_db,
         user_id=user_id,
         filename=filename,
-        s3_key=s3_key,
+        blob_pathname=blob_pathname,
         size=size,
         content_type=content_type,
     )
 
-    return jsonify({"upload": upload_spec, "file": file_doc}), HTTPStatus.CREATED
+    return jsonify({
+        "upload": {
+            "pathname": blob_pathname,
+            "client_token": client_token,
+        },
+        "file": file_doc
+    }), HTTPStatus.CREATED
 
 
 @api_bp.post("/upload/<file_id>/complete")
 def confirm_upload(file_id: str) -> Response:
     user_id = _resolve_user_id()
     payload = request.get_json(force=True) or {}
+
+    blob_url = payload.get("blob_url")
+    if not blob_url:
+        abort(HTTPStatus.BAD_REQUEST, description="blob_url is required")
+
     size = payload.get("size")
     if size is not None:
         try:
@@ -137,10 +144,12 @@ def confirm_upload(file_id: str) -> Response:
             abort(HTTPStatus.BAD_REQUEST, description="size must be an integer")
         if size <= 0:
             abort(HTTPStatus.BAD_REQUEST, description="size must be positive")
+
     updated = mark_upload_completed(
         current_app.mongo_db,
         file_id=file_id,
         user_id=user_id,
+        blob_url=blob_url,
         size=size,
     )
     if not updated:
@@ -155,10 +164,8 @@ def download_file(file_id: str) -> Response:
     if not file_doc:
         abort(HTTPStatus.NOT_FOUND, description="File not found")
 
-    url = generate_download_url(
-        s3_client=current_app.s3_client,
-        bucket=current_app.config["AWS_S3_BUCKET"],
-        key=file_doc["s3_key"],
-        expires_in=current_app.config["PRESIGN_TTL_SECONDS"],
-    )
-    return jsonify({"download_url": url, "file": file_doc})
+    if not file_doc.get("blob_url"):
+        abort(HTTPStatus.NOT_FOUND, description="File upload not completed")
+
+    # Vercel Blob URLs are directly accessible, no need for presigning
+    return jsonify({"download_url": file_doc["blob_url"], "file": file_doc})

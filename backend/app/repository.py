@@ -23,7 +23,8 @@ def serialize_file(doc: Dict[str, Any]) -> Dict[str, Any]:
         "filename": doc["filename"],
         "size": doc.get("size"),
         "content_type": doc.get("content_type"),
-        "s3_key": doc["s3_key"],
+        "blob_pathname": doc.get("blob_pathname"),
+        "blob_url": doc.get("blob_url"),
         "status": doc.get("status", "pending"),
         "created_at": doc["created_at"].isoformat(),
         "updated_at": doc["updated_at"].isoformat(),
@@ -38,12 +39,12 @@ def record_upload_init(
     *,
     user_id: str,
     filename: str,
-    s3_key: str,
+    blob_pathname: str,
     size: Optional[int],
     content_type: Optional[str],
 ) -> Dict[str, Any]:
     """
-    Store upload metadata before the client pushes the bytes to S3.
+    Store upload metadata before the client pushes the bytes to Vercel Blob.
     """
     now = _utcnow()
     document = {
@@ -51,7 +52,8 @@ def record_upload_init(
         "filename": filename,
         "size": size,
         "content_type": content_type,
-        "s3_key": s3_key,
+        "blob_pathname": blob_pathname,
+        "blob_url": None,
         "status": "pending",
         "created_at": now,
         "updated_at": now,
@@ -67,12 +69,18 @@ def mark_upload_completed(
     *,
     file_id: str,
     user_id: str,
+    blob_url: str,
     size: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Mark an upload as completed, storing the final size if available.
+    Mark an upload as completed, storing the blob URL and final size.
     """
-    update_fields: Dict[str, Any] = {"status": "complete", "uploaded_at": _utcnow(), "updated_at": _utcnow()}
+    update_fields: Dict[str, Any] = {
+        "status": "complete",
+        "blob_url": blob_url,
+        "uploaded_at": _utcnow(),
+        "updated_at": _utcnow()
+    }
     if size is not None:
         update_fields["size"] = size
 
