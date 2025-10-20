@@ -15,7 +15,6 @@ private enum Palette {
     static let border = Color.black.opacity(0.08)
     static let shadow = Color.black.opacity(0.18)
     static let icon = Color(nsColor: .secondaryLabelColor)
-    static let secondaryText = Color(nsColor: .tertiaryLabelColor)
 }
 
 struct ContentView: View {
@@ -30,9 +29,9 @@ struct ContentView: View {
                     .zIndex(0)
 
                 contentLayer
-                    .padding(.horizontal, 12)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 10)
+                    .padding(.bottom, 12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .zIndex(1)
 
@@ -83,12 +82,11 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 240, alignment: .center)
-        .padding(.vertical, 16)
     }
 
     private var itemsListView: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            LazyVStack(spacing: 14) {
+            LazyVStack() {
                 ForEach(shelf.items) { item in
                     ShelfItemRow(
                         item: item,
@@ -96,14 +94,13 @@ struct ContentView: View {
                         onReveal: revealInFinder,
                         borderColor: borderColor,
                         highlightBorderColor: highlightBorderColor,
-                        secondaryTextColor: secondaryTextColor,
                         surfaceColor: surfaceColor,
                         shadowColor: shadowColor
                     )
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: shelf.items)
-            .padding(.vertical, 2)
+            .padding(.top, 0)
+            .padding(.bottom, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -181,10 +178,6 @@ struct ContentView: View {
         Palette.shadow
     }
 
-    private var secondaryTextColor: Color {
-        Palette.secondaryText
-    }
-
     private var accentColor: Color {
         Palette.accent
     }
@@ -226,7 +219,6 @@ private struct ShelfItemRow: View {
     let onReveal: (ShelfItem) -> Void
     let borderColor: Color
     let highlightBorderColor: Color
-    let secondaryTextColor: Color
     let surfaceColor: Color
     let shadowColor: Color
 
@@ -234,64 +226,66 @@ private struct ShelfItemRow: View {
 
     var body: some View {
         let url = item.resolvedURL()
-        return DraggableRowContainer(item: item) {
-            rowContent(for: url)
-        }
+        return rowContent(for: url)
     }
 
     @ViewBuilder
     private func rowContent(for url: URL) -> some View {
-        VStack(spacing: 8) {
-            ZStack(alignment: .bottomTrailing) {
-                thumbnail(for: url)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .shadow(color: shadowColor.opacity(0.12), radius: 6, y: 3)
+        HStack(alignment: .center, spacing: 10) {
+            DraggableRowContainer(item: item) {
+                VStack(spacing: 8) {
+                    thumbnail(for: url)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: shadowColor.opacity(0.12), radius: 6, y: 3)
 
-                VStack(spacing: 6) {
-                    ShelfActionButton(
-                        systemName: "magnifyingglass",
-                        tooltip: "Reveal in Finder",
-                        backgroundColor: iconBackgroundColor,
-                        foregroundColor: iconColor,
-                        size: 22,
-                        cornerRadius: 6
-                    ) {
-                        onReveal(item)
-                    }
-
-                    ShelfActionButton(
-                        systemName: "xmark",
-                        tooltip: "Remove",
-                        backgroundColor: iconBackgroundColor,
-                        foregroundColor: Color(nsColor: .systemRed),
-                        size: 22,
-                        cornerRadius: 6
-                    ) {
-                        onRemove(item)
-                    }
+                    Text(truncatedDisplayName(for: url))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .opacity(isHovering ? 1 : 0)
-                .animation(.easeInOut(duration: 0.15), value: isHovering)
-                .offset(x: 6, y: 6)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
+            .frame(width: 90, alignment: .leading)
 
-            Text(truncatedDisplayName(for: url))
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.primary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 72)
+            VStack(spacing: 6) {
+                ShelfActionButton(
+                    systemName: "magnifyingglass",
+                    tooltip: "Reveal in Finder",
+                    backgroundColor: iconBackgroundColor,
+                    foregroundColor: iconColor,
+                    size: 22,
+                    cornerRadius: 6
+                ) {
+                    onReveal(item)
+                }
+
+                ShelfActionButton(
+                    systemName: "xmark",
+                    tooltip: "Remove",
+                    backgroundColor: iconBackgroundColor,
+                    foregroundColor: Color(nsColor: .systemRed),
+                    size: 22,
+                    cornerRadius: 6
+                ) {
+                    onRemove(item)
+                }
+            }
+            .frame(width: 24)
+            .opacity(isHovering ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isHovering)
         }
-        .frame(width: 80)
-        .padding(.vertical, 12)
-        .padding(.horizontal, 16)
+        .frame(width: 140, alignment: .leading)
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
         .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(surfaceColor)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .stroke(isHovering ? highlightBorderColor : borderColor, lineWidth: 1)
                 )
                 .shadow(color: shadowColor.opacity(isHovering ? 0.25 : 0.12), radius: 18, y: isHovering ? 10 : 6)
@@ -319,15 +313,6 @@ private struct ShelfItemRow: View {
 
     private var iconBackgroundColor: Color { Palette.surface.opacity(0.85) }
     private var iconColor: Color { Palette.icon }
-
-    private func displayPath(for url: URL) -> String {
-        let path = url.path
-        let home = NSHomeDirectory()
-        if path.hasPrefix(home) {
-            return "~" + String(path.dropFirst(home.count))
-        }
-        return path
-    }
 
     private func truncatedDisplayName(for url: URL, maxLength: Int = 10) -> String {
         let name = url.lastPathComponent
@@ -426,6 +411,7 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
     var item: ShelfItem
     private let hostingView: NSHostingView<Content>
     private var isDraggingSessionActive = false
+    private var mouseDownEvent: NSEvent?
 
     init(item: ShelfItem, rootView: Content) {
         self.item = item
@@ -454,9 +440,17 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         hostingView.rootView = rootView
     }
 
+    override func mouseDown(with event: NSEvent) {
+        mouseDownEvent = event
+        super.mouseDown(with: event)
+    }
+
     override func mouseDragged(with event: NSEvent) {
         if !isDraggingSessionActive {
-            startDraggingSession(with: event)
+            // Use the stored mouseDown event if available, otherwise use current event
+            let dragEvent = mouseDownEvent ?? event
+            startDraggingSession(with: dragEvent)
+            mouseDownEvent = nil
         }
         super.mouseDragged(with: event)
     }
@@ -479,8 +473,19 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         return image
     }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        return true
+    }
+
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        return .copy
+        switch context {
+        case .withinApplication:
+            return .move
+        case .outsideApplication:
+            return [.move, .copy]
+        @unknown default:
+            return [.move, .copy]
+        }
     }
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {

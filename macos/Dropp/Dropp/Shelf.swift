@@ -53,45 +53,32 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
     private var isAccessingResource = false
 
     init(url: URL) {
-        var createdBookmarkData: Data?
-        var createdUsesSecurityScope = false
-
-        let didStartAccess = url.startAccessingSecurityScopedResource()
-        if didStartAccess {
+        do {
+            bookmarkData = try url.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            bookmarkUsesSecurityScope = true
+        } catch {
+            NSLog("⚠️ Failed to create security-scoped bookmark for \(url.lastPathComponent): \(error.localizedDescription)")
             do {
-                createdBookmarkData = try url.bookmarkData(
-                    options: [.withSecurityScope],
-                    includingResourceValuesForKeys: nil,
-                    relativeTo: nil
-                )
-                createdUsesSecurityScope = true
-            } catch {
-                NSLog("⚠️ Failed to create security-scoped bookmark for \(url.lastPathComponent): \(error.localizedDescription)")
-            }
-        }
-
-        if didStartAccess {
-            url.stopAccessingSecurityScopedResource()
-        }
-
-        if createdBookmarkData == nil {
-            // Persist access using a regular bookmark; works when a security scope is unavailable.
-            do {
-                createdBookmarkData = try url.bookmarkData(
+                bookmarkData = try url.bookmarkData(
                     options: [],
                     includingResourceValuesForKeys: nil,
                     relativeTo: nil
                 )
+                bookmarkUsesSecurityScope = false
             } catch {
                 NSLog("❌ Failed to create bookmark: \(url.lastPathComponent) — \(error.localizedDescription)")
+                bookmarkData = Data()
+                bookmarkUsesSecurityScope = false
             }
         }
 
-        self.bookmarkData = createdBookmarkData ?? Data()
-        self.bookmarkUsesSecurityScope = createdUsesSecurityScope && createdBookmarkData != nil
         self.isAccessingResource = false
 
-        if createdBookmarkData != nil {
+        if !bookmarkData.isEmpty {
             NSLog("✅ Added: \(url.lastPathComponent)")
         } else {
             NSLog("❌ Failed to add: \(url.lastPathComponent)")

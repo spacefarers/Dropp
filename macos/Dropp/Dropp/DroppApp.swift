@@ -13,7 +13,6 @@ final class FileDragStartObserver {
     private var monitors: [Any] = []
     private var lastFiredChangeCount: Int = -1   // which drag we've already reported
     private var isDragging = false
-    private var currentDragURLs: [URL] = []
 
     func start() {
         let pb = NSPasteboard(name: .drag)
@@ -38,26 +37,22 @@ final class FileDragStartObserver {
         let currentCC = pb.changeCount
 
         guard currentCC != lastFiredChangeCount else { return }
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL],
-           !urls.isEmpty {
-            lastFiredChangeCount = currentCC
+        lastFiredChangeCount = currentCC
+
+        let knownFileTypes: Set<NSPasteboard.PasteboardType> = [.fileURL, .URL, .filePromise]
+        let types = Set(pb.types ?? [])
+        let isLikelyFileDrag = !knownFileTypes.isDisjoint(with: types)
+
+        if isLikelyFileDrag {
             isDragging = true
-            currentDragURLs = urls
-            onFileDragStart?(urls)
+            onFileDragStart?([])
         }
     }
 
     private func handleMouseUp() {
         guard isDragging else { return }
         isDragging = false
-        let pb = NSPasteboard(name: .drag)
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        let urls = (pb.readObjects(forClasses: [NSURL.self], options: options) as? [URL]) ?? currentDragURLs
-
-        if !urls.isEmpty {
-            onFileDragEnd?(urls)
-        }
+        onFileDragEnd?([])
     }
 
     var onFileDragStart: (([URL]) -> Void)?
@@ -66,16 +61,23 @@ final class FileDragStartObserver {
 
 final class WindowVisibilityController {
     private weak var window: NSWindow?
+    private weak var shelf: Shelf?
     private(set) var isVisible: Bool = false
     private var shouldOrderOutAfterFade = false
     private let animationDuration: TimeInterval = 0.2
 
-    func attach(window: NSWindow) {
+    func attach(window: NSWindow, shelf: Shelf) {
         self.window = window
+        self.shelf = shelf
         isVisible = window.isVisible
     }
 
     func setVisible(_ visible: Bool) {
+        // Never hide the window if there are items in the shelf
+        if !visible, let shelf = shelf, !shelf.items.isEmpty {
+            return
+        }
+
         if visible == isVisible { return }
         DispatchQueue.main.async {
             guard let window = self.window else {
@@ -86,12 +88,11 @@ final class WindowVisibilityController {
             if visible {
                 self.shouldOrderOutAfterFade = false
                 WindowLayout.applySizeAndPosition(window)
-                NSApp.activate(ignoringOtherApps: true)
 
                 if !window.isVisible {
                     window.alphaValue = 0
                 }
-                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
 
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = self.animationDuration
@@ -131,11 +132,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shelf = Shelf()
     private let fileDragObserver = FileDragStartObserver()
     private let visibilityController = WindowVisibilityController()
-    private var mainWindow: NSWindow?
+    private var mainWindow: NSPanel?
     private var notificationTokens: [NSObjectProtocol] = []
     private var skipNextActivationUpdate = false
-    private var isDraggingFiles = false
     private var hasShownDiskAccessAlert = false
+    private var globalMouseDownMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         promptForDiskAccessIfNeeded()
@@ -145,23 +146,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingController = NSHostingController(rootView: rootView)
 
-        let window = NSWindow(
+        let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: WindowLayout.targetSize),
-            styleMask: [.titled, .fullSizeContentView],
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
-        window.contentViewController = hostingController
-        window.isReleasedWhenClosed = false
+        panel.contentViewController = hostingController
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
 
-        WindowLayout.configure(window)
-        window.orderOut(nil)
+        WindowLayout.configure(panel)
+        panel.orderOut(nil)
 
-        visibilityController.attach(window: window)
-        mainWindow = window
+        visibilityController.attach(window: panel, shelf: shelf)
+        mainWindow = panel
 
         wireDragCallbacks()
         installObservers()
+        installGlobalMouseMonitor()
 
         // Surface the window immediately on launch.
         showWindowSuppressingActivationUpdate()
@@ -171,6 +176,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileDragObserver.stop()
         notificationTokens.forEach(NotificationCenter.default.removeObserver)
         notificationTokens.removeAll()
+        if let monitor = globalMouseDownMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalMouseDownMonitor = nil
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -183,17 +192,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileDragObserver.onFileDragStart = { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
-                self.isDraggingFiles = true
                 self.showWindowSuppressingActivationUpdate()
             }
         }
         fileDragObserver.onFileDragEnd = { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
-                self.isDraggingFiles = false
                 // Allow the drop callback to finish mutating the shelf before evaluating.
                 try? await Task.sleep(nanoseconds: 120_000_000)
-                self.updateVisibilityBasedOnShelf()
+                self.visibilityController.setVisible(false)
             }
         }
         fileDragObserver.start()
@@ -240,19 +247,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.updateVisibilityBasedOnShelf()
+                self?.visibilityController.setVisible(false)
             }
         )
     }
 
-    private func updateVisibilityBasedOnShelf() {
-        if isDraggingFiles {
-            return
-        }
-        if shelf.items.isEmpty {
-            visibilityController.setVisible(false)
-        } else {
-            visibilityController.setVisible(true)
+    private func installGlobalMouseMonitor() {
+        globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            guard let window = self.mainWindow, window.isVisible else { return }
+            let mouseLocation = NSEvent.mouseLocation
+            if !window.frame.contains(mouseLocation) {
+                self.visibilityController.setVisible(false)
+            }
         }
     }
 
@@ -261,11 +270,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             skipNextActivationUpdate = false
             return
         }
-        updateVisibilityBasedOnShelf()
+        visibilityController.setVisible(false)
     }
 
     private func showWindowSuppressingActivationUpdate() {
-        skipNextActivationUpdate = true
+        skipNextActivationUpdate = NSApp.isActive
         visibilityController.setVisible(true)
     }
 
@@ -308,6 +317,9 @@ private enum WindowLayout {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
 
+        window.isOpaque = false
+        window.backgroundColor = .clear
+
         window.isMovable = false
         window.isMovableByWindowBackground = false
         window.styleMask.remove(.resizable)
@@ -318,6 +330,18 @@ private enum WindowLayout {
 
         window.collectionBehavior.remove(.fullScreenPrimary)
         window.collectionBehavior.remove(.fullScreenAuxiliary)
+
+        if let contentView = window.contentView {
+            contentView.wantsLayer = true
+            contentView.layer?.cornerRadius = 10
+            contentView.layer?.masksToBounds = true
+        }
+
+        if let hostingView = window.contentView?.subviews.first {
+            hostingView.wantsLayer = true
+            hostingView.layer?.cornerRadius = 10
+            hostingView.layer?.masksToBounds = true
+        }
 
         applySizeAndPosition(window)
     }
@@ -338,5 +362,17 @@ private enum WindowLayout {
         // Use a floating level so popups/menus can appear above.
         window.level = .floating
         window.hasShadow = true
+
+        if let contentView = window.contentView {
+            contentView.wantsLayer = true
+            contentView.layer?.cornerRadius = 10
+            contentView.layer?.masksToBounds = true
+        }
+
+        if let hostingView = window.contentView?.subviews.first {
+            hostingView.wantsLayer = true
+            hostingView.layer?.cornerRadius = 10
+            hostingView.layer?.masksToBounds = true
+        }
     }
 }
