@@ -233,7 +233,6 @@ private struct ShelfItemRow: View {
     private func rowContent(for url: URL) -> some View {
         HStack(alignment: .center, spacing: 10) {
             DraggableRowContainer(item: item, onExternalMove: { movedItem in
-                // Move should be immediate; avoid list implicit animation here.
                 onRemove(movedItem)
             }) {
                 VStack(spacing: 8) {
@@ -420,6 +419,7 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
     private var isDraggingSessionActive = false
     private var mouseDownEvent: NSEvent?
     private var onExternalMove: ((ShelfItem) -> Void)?
+    private var isDraggingOutsideApp = false
 
     init(item: ShelfItem, rootView: Content, onExternalMove: ((ShelfItem) -> Void)?) {
         self.item = item
@@ -490,10 +490,13 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         switch context {
         case .withinApplication:
+            isDraggingOutsideApp = false
             return .move
         case .outsideApplication:
+            isDraggingOutsideApp = true
             return [.move, .copy]
         @unknown default:
+            isDraggingOutsideApp = true
             return [.move, .copy]
         }
     }
@@ -502,10 +505,14 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         isDraggingSessionActive = false
         item.endDragAccess()
 
-        // If the destination actually performed a move, remove it from the shelf.
-        if operation.contains(.move) {
+        // Remove from shelf if dragged outside the app and the operation succeeded
+        // (operation is not empty means the drop was accepted by the destination)
+        if isDraggingOutsideApp && !operation.isEmpty {
             onExternalMove?(item)
         }
+
+        // Reset the flag
+        isDraggingOutsideApp = false
     }
 }
 
