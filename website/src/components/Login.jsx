@@ -3,16 +3,36 @@ import { useClerk } from '@clerk/clerk-react'
 import './Login.css'
 
 const DEFAULT_BACKEND_BASE = '/api'
+const DEFAULT_APP_REDIRECT_URI = 'dropp://auth/callback'
 const envBackendUrl = import.meta.env.VITE_BACKEND_URL
 const normalizedBackendUrl = (envBackendUrl || '').trim().replace(/\/$/, '')
 const backendBaseUrl = normalizedBackendUrl || DEFAULT_BACKEND_BASE
 const jwtTemplate = import.meta.env.VITE_CLERK_JWT_TEMPLATE
+const envAppRedirectUri = (import.meta.env.VITE_APP_REDIRECT_URI || '').trim()
 
 const buildBackendUrl = (path) => {
   if (!path.startsWith('/')) {
     throw new Error(`Backend API paths must start with '/': received "${path}"`)
   }
   return `${backendBaseUrl}${path}`
+}
+
+const resolveRedirectUri = () => {
+  if (typeof window === 'undefined') {
+    return envAppRedirectUri || DEFAULT_APP_REDIRECT_URI
+  }
+
+  try {
+    const currentUrl = new URL(window.location.href)
+    const redirectFromQuery = currentUrl.searchParams.get('redirect_uri')
+    if (redirectFromQuery) {
+      return redirectFromQuery
+    }
+  } catch (error) {
+    console.warn('Unable to parse redirect URI from location', error)
+  }
+
+  return envAppRedirectUri || DEFAULT_APP_REDIRECT_URI
 }
 
 export default function Login() {
@@ -22,6 +42,7 @@ export default function Login() {
   const [statusError, setStatusError] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [finalized, setFinalized] = useState(false)
+  const [redirectUri] = useState(resolveRedirectUri)
 
   useEffect(() => {
     if (!clerk || !signInRef.current) return
@@ -55,12 +76,28 @@ export default function Login() {
 
         const payload = await response.json()
         setFinalized(true)
-        setStatus('Redirecting…')
+        setStatus('Returning to Dropp…')
 
-        const redirectUrl = new URL('dropp://auth/callback')
+        const target = redirectUri || DEFAULT_APP_REDIRECT_URI
+        let redirectUrl
+
+        try {
+          redirectUrl = new URL(target)
+        } catch (parseError) {
+          console.error('Invalid redirect URI', target, parseError)
+          throw new Error('The redirect URI provided is invalid.')
+        }
+
+        const sessionToken = payload.session_token || token
+        if (sessionToken) {
+          redirectUrl.searchParams.set('session_token', sessionToken)
+        }
         redirectUrl.searchParams.set('user_id', payload.user_id)
         if (payload.email) {
           redirectUrl.searchParams.set('email', payload.email)
+        }
+        if (payload.session_id) {
+          redirectUrl.searchParams.set('session_id', payload.session_id)
         }
 
         window.location.replace(redirectUrl.toString())
@@ -96,7 +133,7 @@ export default function Login() {
     return () => {
       unsubscribe()
     }
-  }, [clerk, finalizing, finalized])
+  }, [clerk, finalizing, finalized, redirectUri])
 
   return (
     <div className="login-container">

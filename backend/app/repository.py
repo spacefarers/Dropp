@@ -119,3 +119,50 @@ def get_file_by_id(db: Database, *, file_id: str, user_id: str) -> Optional[Dict
     if not doc:
         return None
     return serialize_file(doc)
+
+
+def serialize_session(doc: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": str(doc["_id"]),
+        "user_id": doc["user_id"],
+        "session_token": doc.get("session_token"),
+        "email": doc.get("email"),
+        "created_at": doc.get("created_at").isoformat()
+        if doc.get("created_at")
+        else None,
+        "updated_at": doc.get("updated_at").isoformat()
+        if doc.get("updated_at")
+        else None,
+    }
+
+
+def record_or_update_session(
+    db: Database,
+    *,
+    user_id: str,
+    session_token: str,
+    email: Optional[str],
+) -> Dict[str, Any]:
+    """Persist the mapping between a Clerk session token and a Dropp user."""
+
+    now = _utcnow()
+    update = {
+        "$set": {
+            "user_id": user_id,
+            "session_token": session_token,
+            "email": email,
+            "updated_at": now,
+        },
+        "$setOnInsert": {
+            "created_at": now,
+        },
+    }
+
+    result = db.sessions.find_one_and_update(
+        {"session_token": session_token},
+        update,
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+
+    return serialize_session(result)

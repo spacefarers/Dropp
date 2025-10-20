@@ -17,6 +17,7 @@ from .repository import (
     get_file_by_id,
     list_files_for_user,
     mark_upload_completed,
+    record_or_update_session,
     record_upload_init,
 )
 from .storage import build_blob_pathname, upload_to_blob
@@ -77,11 +78,18 @@ def clerk_finalize_session() -> Response:
         abort(HTTPStatus.BAD_REQUEST, description="Missing Clerk authentication token.")
 
     clerk_user = _verify_clerk_session_token(request_token)
+    session_doc = record_or_update_session(
+        current_app.mongo_db,
+        user_id=clerk_user.user_id,
+        session_token=request_token,
+        email=clerk_user.email,
+    )
     return jsonify(
         {
             "session_token": request_token,
             "user_id": clerk_user.user_id,
             "email": clerk_user.email,
+            "session_id": session_doc.get("id"),
         }
     )
 

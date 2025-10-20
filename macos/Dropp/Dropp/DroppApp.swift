@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    // Handle custom URL scheme redirects, e.g., dropp://auth?session_token=...&username=...
+    // Handle custom URL scheme redirects, e.g., dropp://auth?session_token=...&user_id=...
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             if AuthManager.shared.handleCallback(url: url) {

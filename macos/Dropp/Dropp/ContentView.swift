@@ -128,7 +128,7 @@ struct ContentView: View {
                     isSettingsMenuPresented = false
                     auth.logout()
                 } label: {
-                    Label("Sign out of \(auth.username ?? "Account")", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label("Sign out of \(auth.identitySummary)", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             } else {
                 Button {
