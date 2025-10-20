@@ -39,7 +39,7 @@ final class FileDragStartObserver {
         guard currentCC != lastFiredChangeCount else { return }
         lastFiredChangeCount = currentCC
 
-        let knownFileTypes: Set<NSPasteboard.PasteboardType> = [.fileURL, .URL, .filePromise]
+        let knownFileTypes: Set<NSPasteboard.PasteboardType> = [.fileURL, .URL]
         let types = Set(pb.types ?? [])
         let isLikelyFileDrag = !knownFileTypes.isDisjoint(with: types)
 
@@ -226,8 +226,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                guard let window = self?.mainWindow else { return }
-                WindowLayout.applySizeAndPosition(window)
+                Task { @MainActor [weak self] in
+                    guard let window = self?.mainWindow else { return }
+                    WindowLayout.applySizeAndPosition(window)
+                }
             }
         )
 
@@ -237,7 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.handleApplicationBecameActive()
+                Task { @MainActor [weak self] in
+                    self?.handleApplicationBecameActive()
+                }
             }
         )
 
@@ -247,7 +251,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.visibilityController.setVisible(false)
+                Task { @MainActor [weak self] in
+                    self?.visibilityController.setVisible(false)
+                }
             }
         )
     }
@@ -256,11 +262,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
-            guard let self = self else { return }
-            guard let window = self.mainWindow, window.isVisible else { return }
-            let mouseLocation = NSEvent.mouseLocation
-            if !window.frame.contains(mouseLocation) {
-                self.visibilityController.setVisible(false)
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                guard let window = self.mainWindow, window.isVisible else { return }
+                let mouseLocation = NSEvent.mouseLocation
+                if !window.frame.contains(mouseLocation) {
+                    self.visibilityController.setVisible(false)
+                }
             }
         }
     }

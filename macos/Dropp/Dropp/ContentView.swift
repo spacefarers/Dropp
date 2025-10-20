@@ -232,7 +232,10 @@ private struct ShelfItemRow: View {
     @ViewBuilder
     private func rowContent(for url: URL) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            DraggableRowContainer(item: item) {
+            DraggableRowContainer(item: item, onExternalMove: { movedItem in
+                // Move should be immediate; avoid list implicit animation here.
+                onRemove(movedItem)
+            }) {
                 VStack(spacing: 8) {
                     thumbnail(for: url)
                         .resizable()
@@ -392,18 +395,22 @@ private struct ShelfActionButton: View {
 private struct DraggableRowContainer<Content: View>: NSViewRepresentable {
     let item: ShelfItem
     let content: Content
+    let onExternalMove: ((ShelfItem) -> Void)?
 
-    init(item: ShelfItem, @ViewBuilder content: () -> Content) {
+    init(item: ShelfItem,
+         onExternalMove: ((ShelfItem) -> Void)? = nil,
+         @ViewBuilder content: () -> Content) {
         self.item = item
+        self.onExternalMove = onExternalMove
         self.content = content()
     }
 
     func makeNSView(context: Context) -> DraggableContainerView<Content> {
-        DraggableContainerView(item: item, rootView: content)
+        DraggableContainerView(item: item, rootView: content, onExternalMove: onExternalMove)
     }
 
     func updateNSView(_ nsView: DraggableContainerView<Content>, context: Context) {
-        nsView.update(item: item, rootView: content)
+        nsView.update(item: item, rootView: content, onExternalMove: onExternalMove)
     }
 }
 
@@ -412,9 +419,11 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
     private let hostingView: NSHostingView<Content>
     private var isDraggingSessionActive = false
     private var mouseDownEvent: NSEvent?
+    private var onExternalMove: ((ShelfItem) -> Void)?
 
-    init(item: ShelfItem, rootView: Content) {
+    init(item: ShelfItem, rootView: Content, onExternalMove: ((ShelfItem) -> Void)?) {
         self.item = item
+        self.onExternalMove = onExternalMove
         self.hostingView = NSHostingView(rootView: rootView)
         super.init(frame: .zero)
         setupHostingView()
@@ -435,8 +444,9 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         ])
     }
 
-    func update(item: ShelfItem, rootView: Content) {
+    func update(item: ShelfItem, rootView: Content, onExternalMove: ((ShelfItem) -> Void)?) {
         self.item = item
+        self.onExternalMove = onExternalMove
         hostingView.rootView = rootView
     }
 
@@ -491,6 +501,11 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         isDraggingSessionActive = false
         item.endDragAccess()
+
+        // If the destination actually performed a move, remove it from the shelf.
+        if operation.contains(.move) {
+            onExternalMove?(item)
+        }
     }
 }
 
