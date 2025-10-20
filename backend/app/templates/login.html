@@ -62,7 +62,17 @@
     <script async crossorigin src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"></script>
     <script>
       window.addEventListener("load", async () => {
-        await Clerk.load({ publishableKey: "{{ clerk_publishable_key }}" });
+        const publishableKey = {{ clerk_publishable_key | tojson }};
+        if (!publishableKey) {
+          console.error("Clerk publishable key is not configured.");
+          const statusElement = document.getElementById("status");
+          statusElement.hidden = false;
+          statusElement.textContent = "Clerk publishable key is missing. Please verify server configuration.";
+          statusElement.classList.add("error");
+          return;
+        }
+
+        await Clerk.load({ publishableKey });
 
         const signInElement = document.getElementById("sign-in");
         const statusElement = document.getElementById("status");
