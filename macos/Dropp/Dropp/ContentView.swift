@@ -19,6 +19,7 @@ private enum Palette {
 
 struct ContentView: View {
     @EnvironmentObject private var shelf: Shelf
+    @EnvironmentObject private var auth: AuthManager
     @State private var isSettingsMenuPresented = false
 
     var body: some View {
@@ -121,6 +122,21 @@ struct ContentView: View {
 
     private var settingsMenu: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Auth section
+            if auth.isLoggedIn {
+                Label("Logged in as \(auth.username ?? "Unknown")", systemImage: "person.crop.circle.badge.checkmark")
+                    .foregroundStyle(Color.primary)
+            } else {
+                Button {
+                    isSettingsMenuPresented = false
+                    auth.openLogin()
+                } label: {
+                    Label("Login…", systemImage: "person.crop.circle.badge.plus")
+                }
+            }
+
+            Divider()
+
             Button {
                 isSettingsMenuPresented = false
                 openAbout()
@@ -140,7 +156,6 @@ struct ContentView: View {
         .labelStyle(.titleAndIcon)
         .buttonStyle(.plain)
         .padding(14)
-        .frame(width: 180, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(surfaceColor)
@@ -446,7 +461,7 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
 
     func update(item: ShelfItem, rootView: Content, onExternalMove: ((ShelfItem) -> Void)?) {
         self.item = item
-        self.onExternalMove = onExternalMove
+               self.onExternalMove = onExternalMove
         hostingView.rootView = rootView
     }
 
@@ -532,4 +547,6 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
 #Preview {
     ContentView()
         .environmentObject(Shelf())
+        .environmentObject(AuthManager.shared)
 }
+

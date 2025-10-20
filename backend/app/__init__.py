@@ -31,7 +31,13 @@ def create_app(preconfigured: Config | None = None) -> Flask:
     app.mongo_client = mongo_client
     app.mongo_db = mongo_client[config.mongo_db]
 
-    CORS(app, supports_credentials=True)
+    default_cors_origins = (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://dropp.yangm.tech",
+    )
+    cors_origins = config.cors_allowed_origins or default_cors_origins
+    CORS(app, supports_credentials=True, origins=cors_origins)
     app.register_blueprint(api_bp)
 
     return app

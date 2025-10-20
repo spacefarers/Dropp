@@ -18,6 +18,18 @@ def _get_env(name: str, default: Optional[str] = None, required: bool = True) ->
     return value
 
 
+def _get_env_list(name: str) -> Optional[tuple[str, ...]]:
+    """
+    Retrieve a comma-separated list environment variable as a tuple of strings.
+    """
+    value = os.environ.get(name)
+    if not value:
+        return None
+
+    entries = tuple(item.strip() for item in value.split(",") if item.strip())
+    return entries or None
+
+
 @dataclass(frozen=True)
 class Config:
     secret_key: str = _get_env("SECRET_KEY", "replace-me")
@@ -31,3 +43,4 @@ class Config:
     clerk_publishable_key: str = _get_env("CLERK_PUBLISHABLE_KEY")
     clerk_jwt_template: Optional[str] = os.environ.get("CLERK_JWT_TEMPLATE")
     app_redirect_uri: str = _get_env("APP_REDIRECT_URI", "dropp://auth/callback")
+    cors_allowed_origins: Optional[tuple[str, ...]] = _get_env_list("CORS_ALLOWED_ORIGINS")

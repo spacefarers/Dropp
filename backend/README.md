@@ -23,13 +23,14 @@ Flask-based backend service that issues pre-signed upload/download URLs for Verc
 | `APP_REDIRECT_URI` | Desktop deep-link (e.g. `dropp://auth/callback`) where we send users after Clerk login. |
 | `PRESIGN_TTL_SECONDS` | TTL for download links (default 900). |
 | `UPLOAD_POST_TTL_SECONDS` | TTL for upload URLs (default 3600). |
+| `CORS_ALLOWED_ORIGINS` | Optional comma-separated list of allowed origins for cross-site requests (e.g. `https://dropp.yangm.tech,https://app.dropp.yangm.tech`). Defaults to localhost + production web domain. |
 
 ## API Overview
 
 - `GET /healthz` – lightweight health check.
 - `GET /login/` – renders the Clerk SignIn component and finalises the Dropp session before redirecting to the desktop deep link.
-- `POST /auth/clerk/session` – verifies a Clerk token, stores the user identity in the Flask session, and returns the user metadata to the caller.
-- `GET /list/` – returns metadata for the authenticated user's files. Expect a Clerk session token in `Authorization: Bearer <token>`, an existing Flask session, or the legacy `X-User-Id` header for desktop clients.
+- `POST /auth/clerk/session` – verifies a Clerk session token and returns the token plus user metadata so clients can persist it locally.
+- `GET /list/` – returns metadata for the authenticated user's files. Always include a Clerk session token via `Authorization: Bearer <token>`.
 - `POST /upload/` – accepts multipart file uploads, streams the file to Vercel Blob storage, stores metadata in MongoDB, and returns the file record. Also supports legacy JSON payload with `{ filename, size?, content_type? }` for backward compatibility.
 - `POST /upload/<file_id>/complete` – optional endpoint for clients to update the blob URL and mark an upload as complete (mainly for backward compatibility with legacy flow).
 - `GET /download/<file_id>` – returns the direct Vercel Blob URL for downloading the file.

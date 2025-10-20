@@ -2,6 +2,19 @@ import { useEffect, useRef, useState } from 'react'
 import { useClerk } from '@clerk/clerk-react'
 import './Login.css'
 
+const DEFAULT_BACKEND_BASE = '/api'
+const envBackendUrl = import.meta.env.VITE_BACKEND_URL
+const normalizedBackendUrl = (envBackendUrl || '').trim().replace(/\/$/, '')
+const backendBaseUrl = normalizedBackendUrl || DEFAULT_BACKEND_BASE
+const jwtTemplate = import.meta.env.VITE_CLERK_JWT_TEMPLATE
+
+const buildBackendUrl = (path) => {
+  if (!path.startsWith('/')) {
+    throw new Error(`Backend API paths must start with '/': received "${path}"`)
+  }
+  return `${backendBaseUrl}${path}`
+}
+
 export default function Login() {
   const { clerk } = useClerk()
   const signInRef = useRef(null)
@@ -24,8 +37,10 @@ export default function Login() {
       setStatusError(false)
 
       try {
-        const token = await session.getToken()
-        const response = await fetch('/api/auth/clerk/session', {
+        const token = jwtTemplate
+          ? await session.getToken({ template: jwtTemplate })
+          : await session.getToken()
+        const response = await fetch(buildBackendUrl('/auth/clerk/session'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

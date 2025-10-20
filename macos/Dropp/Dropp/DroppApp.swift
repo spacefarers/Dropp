@@ -138,11 +138,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasShownDiskAccessAlert = false
     private var globalMouseDownMonitor: Any?
 
+    // Inject AuthManager singleton
+    private let auth = AuthManager.shared
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Load any persisted auth state
+        auth.loadFromStorage()
+
         promptForDiskAccessIfNeeded()
 
         let rootView = ContentView()
             .environmentObject(shelf)
+            .environmentObject(auth)
 
         let hostingController = NSHostingController(rootView: rootView)
 
@@ -186,6 +193,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         promptForDiskAccessIfNeeded()
         showWindowSuppressingActivationUpdate()
         return true
+    }
+
+    // Handle custom URL scheme redirects, e.g., dropp://auth?session_token=...&username=...
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if AuthManager.shared.handleCallback(url: url) {
+                // Optionally bring app to front after successful login
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
     }
 
     private func wireDragCallbacks() {
@@ -319,7 +336,7 @@ struct DroppApp: App {
 }
 
 private enum WindowLayout {
-    static let targetSize = NSSize(width: 170, height: 400)
+    static let targetSize = NSSize(width: 160, height: 400)
 
     static func configure(_ window: NSWindow) {
         window.titleVisibility = .hidden
@@ -384,3 +401,4 @@ private enum WindowLayout {
         }
     }
 }
+

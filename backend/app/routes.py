@@ -10,10 +10,9 @@ from flask import (
     current_app,
     jsonify,
     request,
-    session,
 )
 
-from .auth import ClerkAuthError, ClerkAuthService
+from .auth import ClerkAuthError, ClerkAuthService, ClerkUser
 from .repository import (
     get_file_by_id,
     list_files_for_user,
@@ -26,26 +25,19 @@ api_bp = Blueprint("api", __name__)
 
 
 def _resolve_user_id() -> str:
-    user_id = session.get("user_id")
-    if user_id:
-        return user_id
-
     token = _extract_clerk_token()
-    if token:
-        try:
-            clerk_user = _clerk_service().verify_token(token)
-        except ClerkAuthError as exc:
-            abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
+    if not token:
+        abort(HTTPStatus.UNAUTHORIZED, description="Clerk session token is required.")
 
-        session["user_id"] = clerk_user.user_id
-        session["email"] = clerk_user.email
-        return clerk_user.user_id
+    clerk_user = _verify_clerk_session_token(token)
+    return clerk_user.user_id
 
-    header_user_id = request.headers.get("X-User-Id")
-    if header_user_id:
-        return header_user_id
 
-    abort(HTTPStatus.UNAUTHORIZED, description="User identity is required")
+def _verify_clerk_session_token(token: str) -> ClerkUser:
+    try:
+        return _clerk_service().verify_token(token)
+    except ClerkAuthError as exc:
+        abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
 
 
 def _extract_clerk_token() -> Optional[str]:
@@ -65,7 +57,7 @@ def _clerk_service() -> ClerkAuthService:
     return ClerkAuthService(secret_key)
 
 
-@api_bp.get("/healthz")
+@api_bp.get("/")
 def healthcheck() -> Dict[str, Any]:
     return {"status": "ok"}
 
@@ -84,14 +76,14 @@ def clerk_finalize_session() -> Response:
     if not request_token:
         abort(HTTPStatus.BAD_REQUEST, description="Missing Clerk authentication token.")
 
-    try:
-        clerk_user = _clerk_service().verify_token(request_token)
-    except ClerkAuthError as exc:
-        abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
-
-    session["user_id"] = clerk_user.user_id
-    session["email"] = clerk_user.email
-    return jsonify({"user_id": clerk_user.user_id, "email": clerk_user.email})
+    clerk_user = _verify_clerk_session_token(request_token)
+    return jsonify(
+        {
+            "session_token": request_token,
+            "user_id": clerk_user.user_id,
+            "email": clerk_user.email,
+        }
+    )
 
 
 @api_bp.get("/list/")

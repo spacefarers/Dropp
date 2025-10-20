@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from http import HTTPStatus
 from typing import Any, Dict, Optional
 
-import requests
+from clerk_backend_api import Clerk
+from clerk_backend_api.models import ClerkBaseError
+from clerk_backend_api.security import verify_token as clerk_verify_token
+from clerk_backend_api.security.types import TokenVerificationError, VerifyTokenOptions
 
 
 class ClerkAuthError(RuntimeError):
@@ -19,14 +21,12 @@ class ClerkUser:
 
 class ClerkAuthService:
     """
-    Minimal helper around Clerk's Verify Token API so route handlers stay lean.
+    Minimal helper around Clerk's backend SDK so route handlers stay lean.
     """
-
-    _VERIFY_URL = "https://api.clerk.com/v1/tokens/verify"
-    _USER_URL_TEMPLATE = "https://api.clerk.com/v1/users/{user_id}"
 
     def __init__(self, secret_key: str):
         self._secret_key = secret_key
+        self._verify_options = VerifyTokenOptions(secret_key=secret_key)
 
     def verify_token(self, token: str) -> ClerkUser:
         claims = self._verify_token_claims(token)
@@ -41,32 +41,14 @@ class ClerkAuthService:
         return ClerkUser(user_id=user_id, email=self._fetch_primary_email(user_id))
 
     def _verify_token_claims(self, token: str) -> Dict[str, Any]:
-        if not token or not token.strip():
+        token_value = (token or "").strip()
+        if not token_value:
             raise ClerkAuthError("Missing Clerk token.")
 
         try:
-            response = requests.post(
-                self._VERIFY_URL,
-                headers={
-                    "Authorization": f"Bearer {self._secret_key}",
-                    "Content-Type": "application/json",
-                },
-                json={"token": token},
-                timeout=10,
-            )
-        except requests.RequestException as exc:
-            raise ClerkAuthError("Unable to reach Clerk token verification endpoint.") from exc
-
-        if response.status_code != HTTPStatus.OK:
-            error_detail: Any
-            try:
-                error_detail = response.json()
-            except ValueError:
-                error_detail = response.text
-            raise ClerkAuthError(f"Clerk token verification failed: {error_detail}")
-
-        payload = response.json()
-        return payload.get("claims", {})
+            return clerk_verify_token(token_value, self._verify_options)
+        except TokenVerificationError as exc:
+            raise ClerkAuthError(f"Clerk token verification failed: {exc}") from exc
 
     @staticmethod
     def _extract_email_from_claims(claims: Dict[str, Any]) -> Optional[str]:
@@ -93,29 +75,26 @@ class ClerkAuthService:
 
     def _fetch_primary_email(self, user_id: str) -> Optional[str]:
         try:
-            response = requests.get(
-                self._USER_URL_TEMPLATE.format(user_id=user_id),
-                headers={"Authorization": f"Bearer {self._secret_key}"},
-                timeout=10,
-            )
-        except requests.RequestException:
+            with Clerk(bearer_auth=self._secret_key) as client:
+                user = client.users.get(user_id=user_id)
+        except ClerkBaseError:
             return None
 
-        if response.status_code != HTTPStatus.OK:
+        if not user:
             return None
 
-        data = response.json()
-        primary_id = data.get("primary_email_address_id")
-        addresses = data.get("email_addresses") or []
+        addresses = list(user.email_addresses or [])
+        primary_id = user.primary_email_address_id
         if primary_id:
             for entry in addresses:
-                if isinstance(entry, dict) and entry.get("id") == primary_id:
-                    return entry.get("email_address")
+                if getattr(entry, "id", None) == primary_id:
+                    candidate = getattr(entry, "email_address", None)
+                    if candidate:
+                        return candidate
 
         for entry in addresses:
-            if isinstance(entry, dict):
-                candidate = entry.get("email_address")
-                if candidate:
-                    return candidate
+            candidate = getattr(entry, "email_address", None)
+            if candidate:
+                return candidate
 
         return None
