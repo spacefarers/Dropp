@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
@@ -10,10 +9,8 @@ from flask import (
     abort,
     current_app,
     jsonify,
-    render_template,
     request,
     session,
-    url_for,
 )
 
 from .auth import ClerkAuthError, ClerkAuthService
@@ -73,25 +70,8 @@ def healthcheck() -> Dict[str, Any]:
     return {"status": "ok"}
 
 
-@api_bp.get("/")
-def homepage() -> Response:
-    return render_template(
-        "home.html",
-        login_url=url_for("api.login_portal"),
-        github_url="https://github.com/spacefarers/Dropp/",
-        current_year=datetime.utcnow().year,
-    )
-
-
-@api_bp.get("/login/")
-def login_portal() -> Response:
-    return render_template(
-        "login.html",
-        clerk_publishable_key=current_app.config["CLERK_PUBLISHABLE_KEY"],
-        finalize_url=url_for("api.clerk_finalize_session"),
-        app_redirect_uri=current_app.config["APP_REDIRECT_URI"],
-        clerk_jwt_template=current_app.config.get("CLERK_JWT_TEMPLATE"),
-    )
+# Frontend is now served separately via web app
+# API endpoints below handle backend logic
 
 
 @api_bp.post("/auth/clerk/session")

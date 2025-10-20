@@ -1,0 +1,46 @@
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+}
+
+.login-card {
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: clamp(2rem, 3vw + 1rem, 3.25rem);
+  border-radius: 16px;
+  width: min(420px, 92vw);
+  text-align: center;
+  box-shadow: 0 22px 45px rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(12px);
+}
+
+.login-card h1 {
+  font-size: clamp(1.6rem, 2vw + 1rem, 2rem);
+  margin-bottom: 0.75rem;
+  margin-top: 0;
+}
+
+.login-lead {
+  color: #cbd5f5;
+  margin-bottom: 2.25rem;
+  line-height: 1.5;
+}
+
+.sign-in-mount {
+  display: flex;
+  justify-content: center;
+  margin: 1.5rem 0;
+}
+
+.login-status {
+  margin-top: 1.5rem;
+  color: #94a3b8;
+  font-size: 0.95rem;
+}
+
+.login-status.error {
+  color: #fca5a5;
+}
