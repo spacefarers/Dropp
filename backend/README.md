@@ -14,7 +14,7 @@ Flask-based backend service that issues pre-signed upload/download URLs for Amaz
 | Name | Description |
 | --- | --- |
 | `SECRET_KEY` | Session signing key for Flask. |
-| `MONGO_URI` | Connection string for MongoDB (e.g. `mongodb+srv://...`). |
+| `MONGODB_URI` | Connection string for MongoDB (e.g. `mongodb+srv://...`). |
 | `MONGO_DB` | Database name for Dropp metadata. |
 | `AWS_S3_BUCKET` | Target S3 bucket that stores user uploads. |
 | `AWS_REGION` | AWS region for the bucket. |
