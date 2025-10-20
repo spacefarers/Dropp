@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react'
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from '@clerk/clerk-react'
 import Login from './components/Login'
 import Home from './components/Home'
+import { useAuth } from './context/AuthContext.jsx'
 
 const resolvePageFromLocation = () => {
   if (typeof window === 'undefined') {
@@ -19,6 +13,7 @@ const resolvePageFromLocation = () => {
 
 function App() {
   const [currentPage, setCurrentPage] = useState(resolvePageFromLocation)
+  const { user, signOut } = useAuth()
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined
@@ -36,50 +31,32 @@ function App() {
   }, [])
 
   if (currentPage === 'login') {
-    return (
-      <>
-        <SignedOut>
-          <Login />
-        </SignedOut>
-        <SignedIn>
-          <Login />
-        </SignedIn>
-      </>
-    )
+    return <Login />
   }
 
+  const handleSignOut = async () => {
+    try {
+      await signOut()
+    } catch (error) {
+      console.error('Failed to sign out', error)
+    }
+  }
+
+  const navAuth = user
+    ? (
+      <button className="header-link" type="button" onClick={handleSignOut}>
+        Sign out
+      </button>
+    )
+    : undefined
+
+  const primaryCta = user ? null : undefined
+
   return (
-    <>
-      <SignedOut>
-        <Home
-          navAuth={
-            <>
-              <SignInButton signInUrl="/login">
-                <button className="header-link" type="button">Sign in</button>
-              </SignInButton>
-              <SignUpButton signUpUrl="/login">
-                <button className="header-link" type="button">Create account</button>
-              </SignUpButton>
-            </>
-          }
-          primaryCta={
-            <SignInButton signInUrl="/login">
-              <button className="btn btn-primary" type="button">Open Dropp</button>
-            </SignInButton>
-          }
-        />
-      </SignedOut>
-      <SignedIn>
-        <Home
-          navAuth={(
-            <div className="header-user">
-              <UserButton afterSignOutUrl="/" />
-            </div>
-          )}
-          primaryCta={null}
-        />
-      </SignedIn>
-    </>
+    <Home
+      navAuth={navAuth}
+      primaryCta={primaryCta}
+    />
   )
 }
 

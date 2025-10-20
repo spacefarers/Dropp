@@ -128,7 +128,11 @@ struct ContentView: View {
                     isSettingsMenuPresented = false
                     auth.logout()
                 } label: {
-                    Label("Sign out of \(auth.identitySummary)", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label {
+                        Text("Sign out of \(auth.identitySummary)")
+                    } icon: {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                    }
                 }
             } else {
                 Button {
@@ -273,17 +277,7 @@ private struct ShelfItemRow: View {
             .frame(width: 90, alignment: .leading)
 
             VStack(spacing: 6) {
-                ShelfActionButton(
-                    systemName: "magnifyingglass",
-                    tooltip: "Reveal in Finder",
-                    backgroundColor: iconBackgroundColor,
-                    foregroundColor: iconColor,
-                    size: 22,
-                    cornerRadius: 6
-                ) {
-                    onReveal(item)
-                }
-
+                // Flip order: Remove on top, Reveal below
                 ShelfActionButton(
                     systemName: "xmark",
                     tooltip: "Remove",
@@ -293,6 +287,17 @@ private struct ShelfItemRow: View {
                     cornerRadius: 6
                 ) {
                     onRemove(item)
+                }
+
+                ShelfActionButton(
+                    systemName: "magnifyingglass",
+                    tooltip: "Reveal in Finder",
+                    backgroundColor: iconBackgroundColor,
+                    foregroundColor: iconColor,
+                    size: 22,
+                    cornerRadius: 6
+                ) {
+                    onReveal(item)
                 }
             }
             .frame(width: 24)

@@ -9,6 +9,7 @@ final class AuthManager: ObservableObject {
     // Customize these to match your backend’s redirect handling
     private let callbackScheme = "dropp"
     private let callbackHost = "auth"
+    private let callbackPath: String? = "/callback"
     private let loginBaseURL = URL(string: "https://dropp.yangm.tech/login")!
 
     @Published private(set) var isLoggedIn: Bool = false
@@ -50,7 +51,7 @@ final class AuthManager: ObservableObject {
     func openLogin() {
         // Construct a redirect URI your site is prepared to use
         var comps = URLComponents(url: loginBaseURL, resolvingAgainstBaseURL: false)!
-        let redirectURI = "\(callbackScheme)://\(callbackHost)"
+        let redirectURI = makeCallbackURLString()
         var items = comps.queryItems ?? []
         items.append(URLQueryItem(name: "redirect_uri", value: redirectURI))
         comps.queryItems = items
@@ -73,13 +74,19 @@ final class AuthManager: ObservableObject {
 
         let q = components.queryItems ?? []
         let token = q.first(where: { $0.name == "session_token" })?.value
+                    ?? q.first(where: { $0.name == "sessionToken" })?.value
                     ?? q.first(where: { $0.name == "token" })?.value
                     ?? q.first(where: { $0.name == "__session" })?.value
         let userId = q.first(where: { $0.name == "user_id" })?.value
+                    ?? q.first(where: { $0.name == "userId" })?.value
                     ?? q.first(where: { $0.name == "uid" })?.value
         let email = q.first(where: { $0.name == "email" })?.value
+                    ?? q.first(where: { $0.name == "email_address" })?.value
+                    ?? q.first(where: { $0.name == "emailAddress" })?.value
         let sessionIdentifier = q.first(where: { $0.name == "session_id" })?.value
+                    ?? q.first(where: { $0.name == "sessionId" })?.value
         let displayName = q.first(where: { $0.name == "display_name" })?.value
+                        ?? q.first(where: { $0.name == "displayName" })?.value
                         ?? email
                         ?? userId
 
@@ -161,5 +168,29 @@ final class AuthManager: ObservableObject {
     var identitySummary: String {
         displayName ?? emailAddress ?? userID ?? "Account"
     }
-}
 
+    private func makeCallbackURLString() -> String {
+        var components = URLComponents()
+        components.scheme = callbackScheme
+        components.host = callbackHost
+        if let callbackPath, !callbackPath.isEmpty {
+            if callbackPath.hasPrefix("/") {
+                components.path = callbackPath
+            } else {
+                components.path = "/\(callbackPath)"
+            }
+        }
+
+        if let string = components.string, !string.isEmpty {
+            return string
+        }
+
+        let path: String
+        if let callbackPath, !callbackPath.isEmpty {
+            path = callbackPath.hasPrefix("/") ? callbackPath : "/\(callbackPath)"
+        } else {
+            path = ""
+        }
+        return "\(callbackScheme)://\(callbackHost)\(path)"
+    }
+}

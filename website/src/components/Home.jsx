@@ -58,7 +58,7 @@ export default function Home({ navAuth, primaryCta }) {
                 <div className="feature-icon">⚡</div>
                 <div>
                   <h3 className="feature-title">Fast &amp; Secure</h3>
-                  <p>Backed by Clerk authentication, Vercel Blob storage, and MongoDB for a responsive, reliable workflow.</p>
+                  <p>Backed by Firebase authentication, Vercel Blob storage, and MongoDB for a responsive, reliable workflow.</p>
                 </div>
               </article>
             </div>

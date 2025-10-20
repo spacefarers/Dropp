@@ -18,7 +18,7 @@ Whether you're moving files from your phone to your Mac or organizing content ac
 - **🔗 Cross-Platform Synchronization** – Files pinned to your shelf sync instantly across all connected devices
 - **📱 Native Apps** – Purpose-built applications for macOS and Android with platform-optimized interfaces
 - **🌐 Web Access** – Manage your files from any browser, anywhere
-- **🔐 Secure Authentication** – Enterprise-grade security with Clerk OAuth integration
+- **🔐 Secure Authentication** – Firebase Authentication with backend session finalization for desktop hand-off
 - **☁️ Cloud-Backed Storage** – Files stored on Vercel's CDN-backed infrastructure for reliable access
 - **⚡ Zero Configuration** – Sign in once, access everywhere
 - **🎯 Intuitive Dropzone** – Drag files to your shelf for instant cross-device availability
@@ -51,7 +51,7 @@ Dropp is built on a modern, scalable microservices architecture:
                             │
         ┌───────────────────┼───────────────────┐
         │                   │                   │
-    MongoDB          Vercel Blob          Clerk Auth
+    MongoDB          Vercel Blob          Firebase Auth
     (Metadata)       (File Storage)       (Authentication)
 ```
 
@@ -61,7 +61,7 @@ Dropp is built on a modern, scalable microservices architecture:
 - Python Flask REST API
 - MongoDB Atlas (metadata & persistence)
 - Vercel Blob (scalable file storage)
-- Clerk (unified authentication)
+- Firebase Authentication (identity provider & token verification)
 
 **Frontend:**
 - React 18 with Vite
@@ -81,7 +81,7 @@ Dropp is built on a modern, scalable microservices architecture:
 - Node.js 16+ (for web frontend)
 - Xcode 14+ (for macOS app development)
 - Android Studio 2021+ (for Android development)
-- Clerk account for authentication (free tier available)
+- Firebase project (Web app + Admin SDK credentials) for authentication
 
 ### Backend Setup
 
@@ -96,8 +96,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Configure environment
-cp .env.example .env
-# Edit .env with your Clerk and MongoDB credentials
+# Create a `.env` file (or export variables) with your Firebase Admin credentials,
+# MongoDB connection string, and any other required secrets.
 
 # Start development server
 python run.py
@@ -113,15 +113,29 @@ cd website
 # Install dependencies
 npm install
 
-# Create environment configuration
-cp .env.example .env.local
-# Edit .env.local with your Clerk publishable key
+# Configure environment by providing the following Vite variables (e.g. via `.env.local`)
 
 # Start development server
 npm run dev
 ```
 
 The web app will be available at `http://localhost:5173`
+
+Required Vite environment variables:
+- `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`
+- Optional Firebase extras: `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_MEASUREMENT_ID`
+- Backend session finalize endpoint: `VITE_BACKEND_URL` (base HTTPS URL) and optional `VITE_AUTH_FINALIZE_PATH` (defaults to `/auth/firebase/session`)
+- Desktop redirect fallback: `VITE_APP_REDIRECT_URI` (default `dropp://auth/callback`)
+
+## Desktop ↔ Web Authentication Flow
+
+- **Environment configuration** – On Vercel (or your hosting provider) set all required `VITE_FIREBASE_*` values plus `VITE_BACKEND_URL` (HTTPS origin for your API) and `VITE_APP_REDIRECT_URI` (default desktop callback). Override the finalize path with `VITE_AUTH_FINALIZE_PATH` only if your API route differs from `/auth/firebase/session`.
+- **Desktop/web hand-off** – The Dropp desktop client launches `https://dropp.yangm.tech/login?redirect_uri=<URL-encoded callback>`. The query param overrides the configured default so the web app knows where to return the user.
+- **User auth in browser** – The `/login` page renders a single “Login with Google” button. Clicking it initializes the Firebase Web SDK (see `src/lib/firebase.js`), preferring `signInWithPopup` and falling back to `signInWithRedirect` when popups are blocked. Auth state is managed inside `AuthContext`.
+- **Session finalization** – As soon as a Firebase user exists, the web app POSTs `${VITE_BACKEND_URL}${VITE_AUTH_FINALIZE_PATH}` with `Authorization: Bearer <Firebase ID token>` and an empty JSON body, using `credentials: 'include'` so secure cookies from your API persist. The backend must verify the token with the Firebase Admin SDK, create or refresh a Dropp session, and respond with JSON such as `{ session_token, user_id, email?, session_id? }`, optionally setting cookies.
+- **Return to the caller** – The frontend merges the backend payload with any Firebase-derived fields and appends everything to the `redirect_uri` before calling `window.location.replace(...)`, handing control back to the desktop app (or other consumer).
+- **Sign-out** – On the marketing page (`/`), the “Sign out” header button invokes `firebase.auth().signOut()`. After sign-out, the page returns to its anonymous state.
+- **Hosting note** – The web client is a static Vite build served from `https://dropp.yangm.tech`; only the finalize endpoint needs to run on your API host. Ensure `VITE_BACKEND_URL` points to that HTTPS origin.
 
 ### macOS App Setup
 
@@ -131,7 +145,7 @@ cd macos/Dropp
 # Open in Xcode
 open Dropp.xcodeproj
 
-# Configure build settings with your Clerk credentials
+# The dropp://auth/callback redirect is preconfigured for Firebase hand-off
 # Build and run (Cmd+R)
 ```
 
@@ -148,14 +162,14 @@ cd android
 ## API Endpoints
 
 ### Authentication
-- `POST /api/auth/clerk/session` – Finalize Clerk session and verify JWT
+- `POST /auth/firebase/session` – Verify Firebase ID token, mint/refresh Dropp session, and return session metadata
 
 ### File Operations
 - `GET /api/list/` – List all files for authenticated user
 - `POST /api/upload/` – Upload file to cloud storage
 - `GET /api/download/<file_id>` – Get direct download URL
 
-All endpoints require Bearer token authentication via JWT.
+All subsequent API requests must include the Dropp session token returned by the finalize endpoint (via `Authorization: Bearer` header) or rely on secure cookies issued by the backend.
 
 ## Deployment
 
@@ -177,9 +191,9 @@ Environment variables are automatically configured during deployment.
 
 ## Security
 
-- **JWT Token Verification** – All API requests validated server-side
+- **Firebase ID Verification** – Backend validates Google ID tokens with the Firebase Admin SDK before issuing Dropp sessions
+- **Session Token Isolation** – Keychain (macOS), SharedPreferences (Android), and HTTPS-only cookies (web) keep session tokens protected
 - **User Data Isolation** – Files scoped to authenticated user
-- **Secure Token Storage** – Keychain (macOS), SharedPreferences (Android)
 - **CORS Protection** – Cross-origin requests strictly controlled
 - **HTTPS Enforced** – All production traffic encrypted
 

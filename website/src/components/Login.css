@@ -29,10 +29,15 @@
   line-height: 1.5;
 }
 
-.sign-in-mount {
+.login-actions {
   display: flex;
   justify-content: center;
   margin: 1.5rem 0;
+}
+
+.login-actions .btn {
+  width: 100%;
+  max-width: 260px;
 }
 
 .login-status {

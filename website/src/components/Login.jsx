@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { useClerk } from '@clerk/clerk-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAuth } from '../context/AuthContext.jsx'
 import './Login.css'
 
 const DEFAULT_BACKEND_BASE = '/api'
@@ -7,8 +7,8 @@ const DEFAULT_APP_REDIRECT_URI = 'dropp://auth/callback'
 const envBackendUrl = import.meta.env.VITE_BACKEND_URL
 const normalizedBackendUrl = (envBackendUrl || '').trim().replace(/\/$/, '')
 const backendBaseUrl = normalizedBackendUrl || DEFAULT_BACKEND_BASE
-const jwtTemplate = import.meta.env.VITE_CLERK_JWT_TEMPLATE
 const envAppRedirectUri = (import.meta.env.VITE_APP_REDIRECT_URI || '').trim()
+const finalizePath = import.meta.env.VITE_AUTH_FINALIZE_PATH || '/auth/firebase/session'
 
 const buildBackendUrl = (path) => {
   if (!path.startsWith('/')) {
@@ -36,111 +36,137 @@ const resolveRedirectUri = () => {
 }
 
 export default function Login() {
-  const { clerk } = useClerk()
-  const signInRef = useRef(null)
+  const { user, loading, signInWithGoogle } = useAuth()
   const [status, setStatus] = useState(null)
   const [statusError, setStatusError] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [finalized, setFinalized] = useState(false)
   const [redirectUri] = useState(resolveRedirectUri)
+  const hasAttemptedFinalization = useRef(false)
 
   useEffect(() => {
-    if (!clerk || !signInRef.current) return
+    if (!user) {
+      hasAttemptedFinalization.current = false
+      setFinalized(false)
+      setFinalizing(false)
+    }
+  }, [user])
 
-    const finalizeSession = async () => {
-      if (finalizing || finalized) return
+  const finalizeSession = useCallback(async (force = false) => {
+    if (!user || finalized) return
+    if (!force && hasAttemptedFinalization.current) return
 
-      const session = clerk.session
-      if (!session) return
+    hasAttemptedFinalization.current = true
+    setFinalizing(true)
+    setStatus('Completing sign-in…')
+    setStatusError(false)
 
-      setFinalizing(true)
-      setStatus('Completing sign-in…')
-      setStatusError(false)
+    try {
+      const token = await user.getIdToken()
+      const response = await fetch(buildBackendUrl(finalizePath), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        credentials: 'include',
+        body: JSON.stringify({}),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Finalize session failed with status ${response.status}`)
+      }
+
+      let payload = {}
+      try {
+        payload = await response.json()
+      } catch (parseError) {
+        console.warn('Finalize session response did not include JSON payload.', parseError)
+      }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        payload = {}
+      }
+
+      setFinalized(true)
+      setStatus('Returning to Dropp…')
+
+      const target = redirectUri || DEFAULT_APP_REDIRECT_URI
+      let redirectUrl
 
       try {
-        const token = jwtTemplate
-          ? await session.getToken({ template: jwtTemplate })
-          : await session.getToken()
-        const response = await fetch(buildBackendUrl('/auth/clerk/session'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          credentials: 'include',
-        })
-
-        if (!response.ok) {
-          throw new Error(`Finalize session failed with status ${response.status}`)
-        }
-
-        const payload = await response.json()
-        setFinalized(true)
-        setStatus('Returning to Dropp…')
-
-        const target = redirectUri || DEFAULT_APP_REDIRECT_URI
-        let redirectUrl
-
-        try {
-          redirectUrl = new URL(target)
-        } catch (parseError) {
-          console.error('Invalid redirect URI', target, parseError)
-          throw new Error('The redirect URI provided is invalid.')
-        }
-
-        const sessionToken = payload.session_token || token
-        if (sessionToken) {
-          redirectUrl.searchParams.set('session_token', sessionToken)
-        }
-        redirectUrl.searchParams.set('user_id', payload.user_id)
-        if (payload.email) {
-          redirectUrl.searchParams.set('email', payload.email)
-        }
-        if (payload.session_id) {
-          redirectUrl.searchParams.set('session_id', payload.session_id)
-        }
-
-        window.location.replace(redirectUrl.toString())
-      } catch (error) {
-        console.error('Failed to finalize Clerk session', error)
-        setFinalizing(false)
-        setStatus("We couldn't finish signing you in. Please try again.")
-        setStatusError(true)
+        redirectUrl = new URL(target)
+      } catch (parseError) {
+        console.error('Invalid redirect URI', target, parseError)
+        throw new Error('The redirect URI provided is invalid.')
       }
-    }
 
-    const handleSignIn = async () => {
-      // Mount the sign-in component
-      if (clerk.user && clerk.session) {
-        await finalizeSession()
-      } else {
-        clerk.mountSignIn(signInRef.current, {
-          redirectUrl: window.location.href,
-          afterSignInUrl: window.location.href,
-        })
+      const fallbackParams = {
+        session_token: payload.session_token ?? payload.sessionToken ?? token,
+        user_id: payload.user_id ?? payload.userId ?? user.uid,
+        email: payload.email ?? user.email ?? undefined,
+        session_id: payload.session_id ?? payload.sessionId ?? undefined,
+        display_name: payload.display_name ?? payload.displayName ?? user.displayName ?? payload.email ?? payload.user_id ?? undefined,
       }
+
+      const redirectParams = { ...payload }
+      Object.entries(fallbackParams).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          redirectParams[key] = value
+        }
+      })
+
+      Object.entries(redirectParams).forEach(([key, value]) => {
+        if (value === undefined || value === null) {
+          return
+        }
+        if (typeof value === 'object') {
+          redirectUrl.searchParams.set(key, JSON.stringify(value))
+          return
+        }
+        redirectUrl.searchParams.set(key, String(value))
+      })
+
+      window.location.replace(redirectUrl.toString())
+    } catch (error) {
+      console.error('Failed to finalize Firebase session', error)
+      setFinalizing(false)
+      setStatus("We couldn't finish signing you in. Please try again.")
+      setStatusError(true)
     }
+  }, [user, finalized, redirectUri])
 
-    // Set up listener for auth changes
-    const unsubscribe = clerk.addListener(async ({ user, session }) => {
-      if (user && session) {
-        await finalizeSession()
-      }
-    })
+  useEffect(() => {
+    if (!user || loading) return
+    finalizeSession()
+  }, [user, loading, finalizeSession])
 
-    handleSignIn()
+  const handleGoogleLogin = async () => {
+    setStatus(null)
+    setStatusError(false)
 
-    return () => {
-      unsubscribe()
+    try {
+      setStatus('Opening Google sign-in…')
+      hasAttemptedFinalization.current = false
+      await signInWithGoogle()
+      setStatus('Waiting for Google sign-in to complete…')
+      await finalizeSession(true)
+    } catch (error) {
+      console.error('Google sign-in failed', error)
+      setStatus('Google sign-in was cancelled or failed. Please try again.')
+      setStatusError(true)
     }
-  }, [clerk, finalizing, finalized, redirectUri])
+  }
 
   return (
     <div className="login-container">
       <main className="login-card">
         <h1>Welcome to Dropp</h1>
-        <p className="login-lead">Authenticate with Clerk to continue to the Dropp desktop app.</p>
-        <div id="sign-in-mount" ref={signInRef} className="sign-in-mount"></div>
+        <p className="login-lead">Authenticate with Firebase to continue to the Dropp desktop app.</p>
+        <div className="login-actions">
+          <button className="btn btn-primary" type="button" onClick={handleGoogleLogin} disabled={loading || finalizing}>
+            Login with Google
+          </button>
+        </div>
         {status && (
           <p className={`login-status ${statusError ? 'error' : ''}`} role="status">
             {status}
