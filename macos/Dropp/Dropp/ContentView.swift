@@ -419,7 +419,7 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
     private var isDraggingSessionActive = false
     private var mouseDownEvent: NSEvent?
     private var onExternalMove: ((ShelfItem) -> Void)?
-    private var isDraggingOutsideApp = false
+    private var didStartDragThisMouseDown = false
 
     init(item: ShelfItem, rootView: Content, onExternalMove: ((ShelfItem) -> Void)?) {
         self.item = item
@@ -452,17 +452,26 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
 
     override func mouseDown(with event: NSEvent) {
         mouseDownEvent = event
+        didStartDragThisMouseDown = false        // allow one drag for this press
         super.mouseDown(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if !isDraggingSessionActive {
-            // Use the stored mouseDown event if available, otherwise use current event
+        // Only allow one start per mouse-down; do nothing after Esc-cancel until mouseUp
+        if !isDraggingSessionActive && !didStartDragThisMouseDown {
             let dragEvent = mouseDownEvent ?? event
+            didStartDragThisMouseDown = true
             startDraggingSession(with: dragEvent)
             mouseDownEvent = nil
         }
         super.mouseDragged(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // Reset so the next press can start a new drag
+        didStartDragThisMouseDown = false
+        mouseDownEvent = nil
+        super.mouseUp(with: event)
     }
 
     private func startDraggingSession(with event: NSEvent) {
@@ -471,7 +480,8 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         draggingItem.setDraggingFrame(bounds, contents: snapshotImage() ?? hostingView)
 
         isDraggingSessionActive = true
-        beginDraggingSession(with: [draggingItem], event: event, source: self)
+        let session = beginDraggingSession(with: [draggingItem], event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true // explicit, matches your expectation
     }
 
     private func snapshotImage() -> NSImage? {
@@ -487,16 +497,20 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         return true
     }
 
+    private func isInsideAnyAppWindow(_ screenPoint: NSPoint) -> Bool {
+        for window in NSApp.windows where window.isVisible {
+            if window.frame.contains(screenPoint) { return true }
+        }
+        return false
+    }
+
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         switch context {
         case .withinApplication:
-            isDraggingOutsideApp = false
-            return .move
+            return [.move, .copy]
         case .outsideApplication:
-            isDraggingOutsideApp = true
             return [.move, .copy]
         @unknown default:
-            isDraggingOutsideApp = true
             return [.move, .copy]
         }
     }
@@ -505,14 +519,13 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         isDraggingSessionActive = false
         item.endDragAccess()
 
-        // Remove from shelf if dragged outside the app and the operation succeeded
-        // (operation is not empty means the drop was accepted by the destination)
-        if isDraggingOutsideApp && !operation.isEmpty {
+        let droppedInsideApp = isInsideAnyAppWindow(screenPoint)
+
+        // Remove only if the drop completed outside the app.
+        // (operation.isEmpty means cancel/fail; keep item in shelf.)
+        if !droppedInsideApp && !operation.isEmpty {
             onExternalMove?(item)
         }
-
-        // Reset the flag
-        isDraggingOutsideApp = false
     }
 }
 

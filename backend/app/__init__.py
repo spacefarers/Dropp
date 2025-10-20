@@ -20,9 +20,9 @@ def create_app(preconfigured: Config | None = None) -> Flask:
         BLOB_READ_WRITE_TOKEN=config.blob_read_write_token,
         PRESIGN_TTL_SECONDS=config.presign_ttl_seconds,
         UPLOAD_POST_TTL_SECONDS=config.upload_post_ttl_seconds,
-        GOOGLE_CLIENT_ID=config.google_client_id,
-        GOOGLE_CLIENT_SECRET=config.google_client_secret,
-        GOOGLE_REDIRECT_URI=config.google_redirect_uri,
+        CLERK_SECRET_KEY=config.clerk_secret_key,
+        CLERK_PUBLISHABLE_KEY=config.clerk_publishable_key,
+        CLERK_JWT_TEMPLATE=config.clerk_jwt_template,
         APP_REDIRECT_URI=config.app_redirect_uri,
     )
 

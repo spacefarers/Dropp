@@ -27,8 +27,7 @@ class Config:
     blob_read_write_token: Optional[str] = os.environ.get("BLOB_READ_WRITE_TOKEN")
     presign_ttl_seconds: int = int(os.environ.get("PRESIGN_TTL_SECONDS", "900"))
     upload_post_ttl_seconds: int = int(os.environ.get("UPLOAD_POST_TTL_SECONDS", "3600"))
-    google_client_id: str = _get_env("GOOGLE_CLIENT_ID")
-    google_client_secret: str = _get_env("GOOGLE_CLIENT_SECRET")
-    google_redirect_uri: str = _get_env("GOOGLE_REDIRECT_URI")
+    clerk_secret_key: str = _get_env("CLERK_SECRET_KEY")
+    clerk_publishable_key: str = _get_env("CLERK_PUBLISHABLE_KEY")
+    clerk_jwt_template: Optional[str] = os.environ.get("CLERK_JWT_TEMPLATE")
     app_redirect_uri: str = _get_env("APP_REDIRECT_URI", "dropp://auth/callback")
-

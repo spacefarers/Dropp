@@ -2,9 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Dropp Login</title>
+    <title>Dropp Sign In</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
+      :root {
+        color-scheme: dark;
+      }
       body {
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background-color: #0f172a;
@@ -14,55 +17,134 @@
         justify-content: center;
         align-items: center;
         min-height: 100vh;
+        padding: 1.5rem;
       }
       .card {
-        background: rgba(15, 23, 42, 0.9);
-        border: 1px solid rgba(148, 163, 184, 0.3);
-        padding: 3rem 4rem;
+        background: rgba(15, 23, 42, 0.92);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        padding: clamp(2rem, 3vw + 1rem, 3.25rem);
         border-radius: 16px;
-        width: min(400px, 90vw);
+        width: min(420px, 92vw);
         text-align: center;
-        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.5);
+        box-shadow: 0 22px 45px rgba(15, 23, 42, 0.55);
+        backdrop-filter: blur(12px);
       }
       h1 {
-        font-size: 1.8rem;
-        margin-bottom: 1rem;
+        font-size: clamp(1.6rem, 2vw + 1rem, 2rem);
+        margin-bottom: 0.75rem;
       }
-      p {
+      p.lead {
         color: #cbd5f5;
-        margin-bottom: 2rem;
+        margin-bottom: 2.25rem;
+        line-height: 1.5;
       }
-      .google-button {
-        display: inline-flex;
-        align-items: center;
-        gap: 1rem;
-        background-color: #fff;
-        color: #1f2937;
-        padding: 0.85rem 1.5rem;
-        border-radius: 50px;
-        text-decoration: none;
-        font-size: 1rem;
-        font-weight: 600;
-        box-shadow: 0 10px 25px rgba(59, 130, 246, 0.35);
-        transition: transform 0.2s ease;
+      .status {
+        margin-top: 1.5rem;
+        color: #94a3b8;
+        font-size: 0.95rem;
       }
-      .google-button:hover {
-        transform: translateY(-4px);
+      .status.error {
+        color: #fca5a5;
       }
-      .google-icon {
-        width: 24px;
-        height: 24px;
+      #sign-in {
+        display: flex;
+        justify-content: center;
       }
     </style>
   </head>
   <body>
     <main class="card">
       <h1>Welcome to Dropp</h1>
-      <p>Sign in with Google to continue to the Dropp desktop app.</p>
-      <a class="google-button" href="{{ google_redirect_url }}">
-        <img class="google-icon" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
-        Continue with Google
-      </a>
+      <p class="lead">Authenticate with Clerk to continue to the Dropp desktop app.</p>
+      <div id="sign-in" aria-live="polite"></div>
+      <p id="status" class="status" role="status" hidden></p>
     </main>
+    <script async crossorigin src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js"></script>
+    <script>
+      window.addEventListener("load", async () => {
+        await Clerk.load({ publishableKey: "{{ clerk_publishable_key }}" });
+
+        const signInElement = document.getElementById("sign-in");
+        const statusElement = document.getElementById("status");
+        let finalizing = false;
+        let finalized = false;
+
+        const setStatus = (message, isError = false) => {
+          if (!message) {
+            statusElement.hidden = true;
+            statusElement.textContent = "";
+            statusElement.classList.remove("error");
+            return;
+          }
+          statusElement.hidden = false;
+          statusElement.textContent = message;
+          statusElement.classList.toggle("error", isError);
+        };
+
+        const finalizeSession = async () => {
+          if (finalizing || finalized) {
+            return;
+          }
+          const session = Clerk.session;
+          if (!session) {
+            return;
+          }
+
+          finalizing = true;
+          setStatus("Completing sign-in…");
+
+          try {
+            const token = {% if clerk_jwt_template %}await session.getToken({ template: "{{ clerk_jwt_template }}" });{% else %}await session.getToken();{% endif %}
+            const response = await fetch("{{ finalize_url }}", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${token}`,
+              },
+              credentials: "include",
+            });
+
+            if (!response.ok) {
+              throw new Error(`Finalize session failed with status ${response.status}`);
+            }
+
+            const payload = await response.json();
+            finalized = true;
+            setStatus("Redirecting…");
+
+            const redirectUrl = new URL("{{ app_redirect_uri }}");
+            redirectUrl.searchParams.set("user_id", payload.user_id);
+            if (payload.email) {
+              redirectUrl.searchParams.set("email", payload.email);
+            }
+
+            window.location.replace(redirectUrl.toString());
+          } catch (error) {
+            console.error("Failed to finalize Clerk session", error);
+            finalizing = false;
+            setStatus("We couldn't finish signing you in. Please try again.", true);
+          }
+        };
+
+        const mountSignIn = () => {
+          Clerk.mountSignIn(signInElement, {
+            redirectUrl: window.location.href,
+            afterSignInUrl: window.location.href,
+          });
+        };
+
+        if (Clerk.user && Clerk.session) {
+          await finalizeSession();
+        } else {
+          mountSignIn();
+        }
+
+        Clerk.addListener(async ({ user, session }) => {
+          if (user && session) {
+            await finalizeSession();
+          }
+        });
+      });
+    </script>
   </body>
 </html>

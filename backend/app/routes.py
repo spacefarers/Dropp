@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from http import HTTPStatus
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from flask import (
     Blueprint,
@@ -9,14 +9,13 @@ from flask import (
     abort,
     current_app,
     jsonify,
-    redirect,
     render_template,
     request,
     session,
     url_for,
 )
 
-from .auth import GoogleOAuthConfig, GoogleOAuthService
+from .auth import ClerkAuthError, ClerkAuthService
 from .repository import (
     get_file_by_id,
     list_files_for_user,
@@ -29,19 +28,43 @@ api_bp = Blueprint("api", __name__)
 
 
 def _resolve_user_id() -> str:
-    user_id = session.get("user_id") or request.headers.get("X-User-Id")
-    if not user_id:
-        abort(HTTPStatus.UNAUTHORIZED, description="User identity is required")
-    return user_id
+    user_id = session.get("user_id")
+    if user_id:
+        return user_id
+
+    token = _extract_clerk_token()
+    if token:
+        try:
+            clerk_user = _clerk_service().verify_token(token)
+        except ClerkAuthError as exc:
+            abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
+
+        session["user_id"] = clerk_user.user_id
+        session["email"] = clerk_user.email
+        return clerk_user.user_id
+
+    header_user_id = request.headers.get("X-User-Id")
+    if header_user_id:
+        return header_user_id
+
+    abort(HTTPStatus.UNAUTHORIZED, description="User identity is required")
 
 
-def _google_service() -> GoogleOAuthService:
-    cfg = GoogleOAuthConfig(
-        client_id=current_app.config["GOOGLE_CLIENT_ID"],
-        client_secret=current_app.config["GOOGLE_CLIENT_SECRET"],
-        redirect_uri=current_app.config["GOOGLE_REDIRECT_URI"],
-    )
-    return GoogleOAuthService(cfg)
+def _extract_clerk_token() -> Optional[str]:
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header.split(" ", 1)[1].strip() or None
+
+    header_token = request.headers.get("Clerk-Session")
+    if header_token:
+        return header_token.strip() or None
+
+    return None
+
+
+def _clerk_service() -> ClerkAuthService:
+    secret_key = current_app.config["CLERK_SECRET_KEY"]
+    return ClerkAuthService(secret_key)
 
 
 @api_bp.get("/healthz")
@@ -53,29 +76,31 @@ def healthcheck() -> Dict[str, Any]:
 def login_portal() -> Response:
     return render_template(
         "login.html",
-        google_client_id=current_app.config["GOOGLE_CLIENT_ID"],
-        google_redirect_url=url_for("api.google_login"),
+        clerk_publishable_key=current_app.config["CLERK_PUBLISHABLE_KEY"],
+        finalize_url=url_for("api.clerk_finalize_session"),
+        app_redirect_uri=current_app.config["APP_REDIRECT_URI"],
+        clerk_jwt_template=current_app.config.get("CLERK_JWT_TEMPLATE"),
     )
 
 
-@api_bp.get("/auth/google")
-def google_login() -> Response:
-    service = _google_service()
-    redirect_uri, state = service.authorization_url()
-    session["oauth_state"] = state
-    return redirect(redirect_uri)
+@api_bp.post("/auth/clerk/session")
+def clerk_finalize_session() -> Response:
+    request_token = _extract_clerk_token()
+    if not request_token:
+        payload = request.get_json(silent=True) or {}
+        request_token = (payload.get("token") or "").strip()
 
+    if not request_token:
+        abort(HTTPStatus.BAD_REQUEST, description="Missing Clerk authentication token.")
 
-@api_bp.get("/auth/google/callback")
-def google_callback() -> Response:
-    service = _google_service()
-    state = session.get("oauth_state")
-    credentials = service.exchange_code(request.url, state)
-    profile = service.user_profile(credentials)
-    session["user_id"] = profile["sub"]
-    session["email"] = profile.get("email")
-    app_redirect = current_app.config["APP_REDIRECT_URI"]
-    return redirect(f"{app_redirect}?user_id={profile['sub']}&email={profile.get('email', '')}")
+    try:
+        clerk_user = _clerk_service().verify_token(request_token)
+    except ClerkAuthError as exc:
+        abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
+
+    session["user_id"] = clerk_user.user_id
+    session["email"] = clerk_user.email
+    return jsonify({"user_id": clerk_user.user_id, "email": clerk_user.email})
 
 
 @api_bp.get("/list/")
