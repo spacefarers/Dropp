@@ -23,7 +23,7 @@ from .repository import (
     mark_upload_completed,
     record_upload_init,
 )
-from .storage import build_blob_pathname, generate_client_upload_token
+from .storage import build_blob_pathname, upload_to_blob
 
 api_bp = Blueprint("api", __name__)
 
@@ -88,10 +88,53 @@ def list_files() -> Response:
 @api_bp.post("/upload/")
 def request_upload() -> Response:
     user_id = _resolve_user_id()
+
+    # Check if this is a multipart file upload
+    if 'file' in request.files:
+        file = request.files['file']
+        if not file or not file.filename:
+            abort(HTTPStatus.BAD_REQUEST, description="file is required")
+
+        filename = file.filename
+        content_type = file.content_type
+
+        # Generate blob pathname and upload
+        blob_pathname = build_blob_pathname(user_id, filename)
+        blob_response = upload_to_blob(
+            pathname=blob_pathname,
+            file_data=file.stream,
+            content_type=content_type,
+        )
+
+        # Get the actual size from uploaded blob
+        size = blob_response.get("size")
+
+        # Record as completed upload
+        file_doc = record_upload_init(
+            current_app.mongo_db,
+            user_id=user_id,
+            filename=filename,
+            blob_pathname=blob_pathname,
+            size=size,
+            content_type=content_type,
+        )
+
+        # Mark as completed immediately with blob URL
+        file_doc = mark_upload_completed(
+            current_app.mongo_db,
+            file_id=file_doc["_id"],
+            user_id=user_id,
+            blob_url=blob_response.get("url"),
+            size=size,
+        )
+
+        return jsonify({"file": file_doc}), HTTPStatus.CREATED
+
+    # Legacy JSON-based flow for backward compatibility
     payload = request.get_json(force=True) or {}
     filename = payload.get("filename")
     if not filename:
-        abort(HTTPStatus.BAD_REQUEST, description="filename is required")
+        abort(HTTPStatus.BAD_REQUEST, description="filename or file is required")
 
     content_type = payload.get("content_type")
     size = payload.get("size")
@@ -104,10 +147,6 @@ def request_upload() -> Response:
             abort(HTTPStatus.BAD_REQUEST, description="size must be positive")
 
     blob_pathname = build_blob_pathname(user_id, filename)
-    client_token = generate_client_upload_token(
-        pathname=blob_pathname,
-        expires_in=current_app.config["UPLOAD_POST_TTL_SECONDS"],
-    )
 
     file_doc = record_upload_init(
         current_app.mongo_db,
@@ -121,7 +160,6 @@ def request_upload() -> Response:
     return jsonify({
         "upload": {
             "pathname": blob_pathname,
-            "client_token": client_token,
         },
         "file": file_doc
     }), HTTPStatus.CREATED

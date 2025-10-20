@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import BinaryIO
 from uuid import uuid4
 
-from vercel_blob import generate_client_token
+import vercel_blob
 
 
 def build_blob_pathname(user_id: str, original_filename: str) -> str:
@@ -17,20 +17,19 @@ def build_blob_pathname(user_id: str, original_filename: str) -> str:
     return f"{user_id}/{timestamp}-{uuid4().hex}{suffix}"
 
 
-def generate_client_upload_token(
+def upload_to_blob(
     *,
     pathname: str,
-    expires_in: int,
-) -> str:
+    file_data: BinaryIO,
+    content_type: str | None = None,
+) -> dict:
     """
-    Generate a client upload token for direct uploads to Vercel Blob.
-    The client can use this token to upload directly without going through the server.
+    Upload a file to Vercel Blob storage.
+    Returns the blob response containing url, pathname, etc.
     """
-    return generate_client_token(
-        pathname=pathname,
-        token_payload={
-            "allowedContentTypes": [],  # Allow any content type
-            "maximumSizeInBytes": 100 * 1024 * 1024,  # 100MB max
-            "validUntil": int((datetime.now(tz=timezone.utc).timestamp() + expires_in) * 1000),
-        }
-    )
+    options = {"pathname": pathname}
+    if content_type:
+        options["content_type"] = content_type
+
+    response = vercel_blob.put(file_data, options=options)
+    return response
