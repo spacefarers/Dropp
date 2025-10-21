@@ -1,32 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
-import { head } from '@vercel/blob';
 import { UserDoc } from '@/types/UserDoc';
 
-interface UploadCompletePayload {
-  blob: {
-    url: string;
-    downloadUrl: string;
-    pathname: string;
-    contentType?: string;
-    contentDisposition: string;
+interface UploadCompleteWebhook {
+  type: string;
+  payload: {
+    blob: {
+      url: string;
+      pathname: string;
+      contentType?: string;
+      contentDisposition: string;
+      uploadedAt: string;
+      size: number;
+    };
+    tokenPayload?: string;
+    apiVersion: number;
   };
-  tokenPayload?: string;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const payload = (await req.json()) as UploadCompletePayload;
-    console.log('Webhook payload received:', JSON.stringify(payload, null, 2));
+    const webhook = (await req.json()) as UploadCompleteWebhook;
+    console.log('Webhook payload received:', JSON.stringify(webhook, null, 2));
 
-    if (!payload.blob) {
-      console.error('Invalid webhook payload: missing blob.url');
+    if (!webhook.payload?.blob) {
+      console.error('Invalid webhook payload: missing blob');
       return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
     }
 
+    const { blob, tokenPayload: tokenPayloadStr } = webhook.payload;
+
     // Parse metadata from token payload
-    const tokenPayload = payload.tokenPayload
-      ? (JSON.parse(payload.tokenPayload) as { userId?: string; origName?: string; userEmail?: string; contentType?: string })
+    const tokenPayload = tokenPayloadStr
+      ? (JSON.parse(tokenPayloadStr) as { userId?: string; origName?: string; userEmail?: string; contentType?: string })
       : null;
 
     if (!tokenPayload?.userId) {
@@ -34,20 +40,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Missing userId in token' }, { status: 400 });
     }
 
-    // Get file size from blob metadata
-    const blobMetadata = await head(payload.blob.url);
-    const fileSize = blobMetadata.size;
+    // Get file size from blob (already included in webhook payload)
+    const fileSize = blob.size;
 
     // Insert file metadata into MongoDB and update user storage
     const db = await getDb();
 
     const result = await db.collection('files').insertOne({
       user_id: tokenPayload.userId,
-      name: tokenPayload.origName || payload.blob.pathname,
-      url: payload.blob.url,
-      download_url: payload.blob.downloadUrl,
+      name: tokenPayload.origName || blob.pathname,
+      url: blob.url,
+      download_url: blob.url, // Use the blob URL as download URL
       size: fileSize,
-      content_type: tokenPayload.contentType || payload.blob.contentType,
+      content_type: tokenPayload.contentType || blob.contentType,
       created_at: new Date().toISOString(),
       status: 'complete',
     });
@@ -58,7 +63,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { $inc: { used: fileSize } }
     );
 
-    console.log(`File uploaded successfully: ${payload.blob.pathname} (id: ${result.insertedId}, size: ${fileSize})`);
+    console.log(`File uploaded successfully: ${blob.pathname} (id: ${result.insertedId}, size: ${fileSize})`);
 
     return NextResponse.json({ success: true, fileId: result.insertedId });
   } catch (error: any) {
