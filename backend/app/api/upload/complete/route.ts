@@ -17,8 +17,9 @@ interface UploadCompletePayload {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const payload = (await req.json()) as UploadCompletePayload;
+    console.log('Webhook payload received:', JSON.stringify(payload, null, 2));
 
-    if (!payload.blob || !payload.blob.url) {
+    if (!payload.blob) {
       console.error('Invalid webhook payload: missing blob.url');
       return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
     }
