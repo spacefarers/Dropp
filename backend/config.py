@@ -42,3 +42,5 @@ class Config:
     firebase_service_account_base64: Optional[str] = os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64")
     app_redirect_uri: str = _get_env("APP_REDIRECT_URI", "dropp://auth/callback")
     cors_allowed_origins: Optional[tuple[str, ...]] = _get_env_list("CORS_ALLOWED_ORIGINS")
+    jwt_secret_key: Optional[str] = os.environ.get("JWT_SECRET_KEY")
+    jwt_ttl_seconds: int = int(os.environ.get("JWT_TTL_SECONDS", str(60 * 60 * 24 * 7)))

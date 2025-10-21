@@ -17,6 +17,10 @@ extension Notification.Name {
 final class Shelf: ObservableObject {
     @Published private(set) var items: [ShelfItem] = []
 
+    // Latest cloud storage info (updated via refresh)
+    @Published var cloudStorageUsed: Int64 = 0
+    @Published var cloudStorageCap: Int64 = 0
+
     func add(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         for url in urls {
@@ -112,14 +116,12 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
             NSLog("❌ Failed to add: \(url.lastPathComponent)")
         }
 
-        // Seed initial metadata from local URL if desired (UI-only; safe to leave nil)
-        // This is optional; you can fill it later when implementing upload/download logic.
-        // Example:
-        // self.cloudInfo = CloudFileInfo(
-        //     filename: url.lastPathComponent,
-        //     size: (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0,
-        //     contentType: "application/octet-stream"
-        // )
+        // Seed minimal info for UI; can be refined on refresh
+        self.cloudInfo = ShelfItem.CloudFileInfo(
+            filename: url.lastPathComponent,
+            size: (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0,
+            contentType: "application/octet-stream"
+        )
     }
 
     private func recreateBookmark(from url: URL) {

@@ -15,8 +15,11 @@ def create_app(preconfigured: Config | None = None) -> Flask:
     config = preconfigured or Config()
 
     app = Flask(__name__)
+    jwt_secret_key = config.jwt_secret_key or config.secret_key
     app.config.from_mapping(
         SECRET_KEY=config.secret_key,
+        JWT_SECRET_KEY=jwt_secret_key,
+        JWT_TTL_SECONDS=config.jwt_ttl_seconds,
         BLOB_READ_WRITE_TOKEN=config.blob_read_write_token,
         PRESIGN_TTL_SECONDS=config.presign_ttl_seconds,
         UPLOAD_POST_TTL_SECONDS=config.upload_post_ttl_seconds,

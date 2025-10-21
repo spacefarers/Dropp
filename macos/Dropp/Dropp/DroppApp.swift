@@ -9,6 +9,10 @@ import SwiftUI
 import AppKit
 import QuartzCore
 
+extension Notification.Name {
+    static let requestForceHideWindow = Notification.Name("RequestForceHideWindow")
+}
+
 final class FileDragStartObserver {
     private var monitors: [Any] = []
     private var lastFiredChangeCount: Int = -1   // which drag we've already reported
@@ -72,9 +76,9 @@ final class WindowVisibilityController {
         isVisible = window.isVisible
     }
 
-    func setVisible(_ visible: Bool) {
-        // Never hide the window if there are items in the shelf
-        if !visible, let shelf = shelf, !shelf.items.isEmpty {
+    func setVisible(_ visible: Bool, force: Bool = false) {
+        // Never hide the window if there are items in the shelf, unless forced
+        if !visible, !force, let shelf = shelf, !shelf.items.isEmpty {
             return
         }
 
@@ -122,7 +126,7 @@ final class WindowVisibilityController {
             }
 
             self.isVisible = visible
-            NSLog(visible ? "Showing window" : "Hiding window")
+            NSLog(visible ? "Showing window" : "Hiding window\(force ? " (forced)" : "")")
         }
     }
 }
@@ -283,6 +287,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 queue: .main
             ) { [weak self] _ in
                 self?.visibilityController.setVisible(false)
+            }
+        )
+
+        // Force hide on request from UI
+        notificationTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: .requestForceHideWindow,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.visibilityController.setVisible(false, force: true)
             }
         )
     }

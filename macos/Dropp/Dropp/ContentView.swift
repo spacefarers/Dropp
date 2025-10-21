@@ -36,9 +36,15 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .zIndex(1)
 
-                settingsButton
-                    .padding(10)
-                    .zIndex(2)
+                // Bottom-left controls: Refresh + Hide + Settings
+                HStack(spacing: 8) {
+                    refreshButton
+                    hideButton
+                    settingsButton
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .zIndex(2)
 
                 if isSettingsMenuPresented {
                     Color.black.opacity(0.001)
@@ -46,6 +52,7 @@ struct ContentView: View {
                         .onTapGesture { isSettingsMenuPresented = false }
                         .zIndex(1)
 
+                    // Show the menu slightly above and to the right of the button
                     settingsMenu
                         .offset(x: 10, y: -48)
                         .zIndex(2)
@@ -106,6 +113,38 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var refreshButton: some View {
+        Button {
+            NSApp.activate(ignoringOtherApps: true)
+            Task { await refreshCloudInventory() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.clockwise")
+            }
+            .foregroundStyle(iconColor)
+            .padding(6)
+        }
+        .buttonStyle(.plain)
+        .help("Refresh Cloud State")
+        .opacity(auth.isLoggedIn ? 1.0 : 0.35)
+        .disabled(!auth.isLoggedIn)
+    }
+
+    private var hideButton: some View {
+        Button {
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: .requestForceHideWindow, object: nil)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "eye.slash")
+            }
+            .foregroundStyle(iconColor)
+            .padding(6)
+        }
+        .buttonStyle(.plain)
+        .help("Hide Window")
+    }
+
     private var settingsButton: some View {
         Button {
             NSApp.activate(ignoringOtherApps: true)
@@ -118,6 +157,7 @@ struct ContentView: View {
             .padding(6)
         }
         .buttonStyle(.plain)
+        .help("Settings")
     }
 
     private var settingsMenu: some View {
@@ -234,6 +274,54 @@ struct ContentView: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
         #endif
     }
+
+    // MARK: - Cloud refresh
+
+    private func refreshCloudInventory() async {
+        guard auth.isLoggedIn else { return }
+        do {
+            let result = try await DroppAPIClient.shared.list()
+            // Update storage caps
+            shelf.cloudStorageUsed = result.storageUsed
+            shelf.cloudStorageCap = result.storageCap
+
+            // Build a lookup for cloud files by filename
+            let cloudByName: [String: ShelfItem.CloudFileInfo] = Dictionary(
+                uniqueKeysWithValues: result.files.map { ($0.filename, $0) }
+            )
+
+            // Update each local item’s state
+            for item in shelf.items {
+                let localName = item.resolvedURL().lastPathComponent
+                if let info = cloudByName[localName] {
+                    item.cloudInfo = info
+                    item.cloudState = .both
+                } else {
+                    // Not present in cloud; keep/seed minimal info
+                    item.cloudInfo = ShelfItem.CloudFileInfo(
+                        filename: localName,
+                        size: (try? item.resolvedURL().resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0,
+                        contentType: "application/octet-stream"
+                    )
+                    item.cloudState = .localOnly
+                }
+            }
+        } catch {
+            NSLog("Failed to refresh cloud inventory: \(error.localizedDescription)")
+            showAlert(title: "Refresh Failed", message: error.localizedDescription)
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        #if os(macOS)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        #endif
+    }
 }
 
 private struct ShelfItemRow: View {
@@ -246,6 +334,7 @@ private struct ShelfItemRow: View {
     let shadowColor: Color
 
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var shelf: Shelf
     @State private var isHovering = false
 
     var body: some View {
@@ -261,11 +350,11 @@ private struct ShelfItemRow: View {
             }) {
                 VStack(spacing: 8) {
                     thumbnail(for: url)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(color: shadowColor.opacity(0.12), radius: 6, y: 3)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .shadow(color: shadowColor.opacity(0.12), radius: 6, y: 3)
 
                     Text(truncatedDisplayName(for: url))
                         .font(.system(size: 11, weight: .medium))
@@ -288,8 +377,7 @@ private struct ShelfItemRow: View {
                         size: 22,
                         cornerRadius: 6
                     ) {
-                        // Placeholder: Wire up upload/download/remove later
-                        NSLog("Cloud action tapped for item \(item.resolvedURL().lastPathComponent) with state \(String(describing: item.cloudState))")
+                        handleCloudAction(for: item)
                     }
                 }
 
@@ -341,6 +429,86 @@ private struct ShelfItemRow: View {
                 isHovering = hovering
             }
         }
+    }
+
+    private func handleCloudAction(for item: ShelfItem) {
+        switch item.cloudState {
+        case .localOnly:
+            // Preflight quota check then upload
+            Task { @MainActor in
+                do {
+                    let fileSize = try determineLocalFileSize(item: item)
+                    let used = shelf.cloudStorageUsed
+                    let cap = shelf.cloudStorageCap
+
+                    if cap > 0 && used + fileSize > cap {
+                        showQuotaAlert(needed: fileSize, used: used, cap: cap)
+                        return
+                    }
+
+                    try await DroppAPIClient.shared.upload(item: item)
+
+                    // Update state to reflect upload
+                    item.cloudState = .both
+                    if item.cloudInfo == nil {
+                        item.cloudInfo = ShelfItem.CloudFileInfo(
+                            filename: item.resolvedURL().lastPathComponent,
+                            size: fileSize,
+                            contentType: "application/octet-stream"
+                        )
+                    } else {
+                        item.cloudInfo?.size = fileSize
+                    }
+                    shelf.cloudStorageUsed = used + fileSize
+                } catch {
+                    showErrorAlert(title: "Upload Failed", message: error.localizedDescription)
+                }
+            }
+        case .cloudOnly:
+            // TODO: Implement download wiring
+            NSLog("Download action tapped for \(item.resolvedURL().lastPathComponent)")
+        case .both:
+            // TODO: Implement cloud remove wiring
+            NSLog("Remove-from-cloud action tapped for \(item.resolvedURL().lastPathComponent)")
+        }
+    }
+
+    private func determineLocalFileSize(item: ShelfItem) throws -> Int64 {
+        if let s = item.cloudInfo?.size, s > 0 { return s }
+        let url = item.resolvedURL()
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        if let size = values.fileSize { return Int64(size) }
+        return 0
+    }
+
+    private func showQuotaAlert(needed: Int64, used: Int64, cap: Int64) {
+        #if os(macOS)
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useGB]
+        formatter.countStyle = .file
+
+        let neededStr = formatter.string(fromByteCount: needed)
+        let usedStr = formatter.string(fromByteCount: used)
+        let capStr = formatter.string(fromByteCount: cap)
+
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Not Enough Cloud Storage"
+        alert.informativeText = "This file (\(neededStr)) would exceed your cloud storage cap (\(usedStr) used of \(capStr))."
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        #endif
+    }
+
+    private func showErrorAlert(title: String, message: String) {
+        #if os(macOS)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        #endif
     }
 
     private func cloudIconName(for state: ShelfItem.CloudPresence) -> String {
@@ -508,7 +676,7 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
 
     func update(item: ShelfItem, rootView: Content, onExternalMove: ((ShelfItem) -> Void)?) {
         self.item = item
-               self.onExternalMove = onExternalMove
+        self.onExternalMove = onExternalMove
         hostingView.rootView = rootView
     }
 
@@ -596,4 +764,3 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         .environmentObject(Shelf())
         .environmentObject(AuthManager.shared)
 }
-

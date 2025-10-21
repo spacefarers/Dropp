@@ -4,6 +4,8 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
@@ -29,11 +31,30 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         sessionManager = new SessionManager(this);
+        handleIntent(getIntent());
 
         if (!sessionManager.isLoggedIn()) {
             showLoginScreen();
         } else {
             showMainContent();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleIntent(intent);
+        recreate();
+    }
+
+    private void handleIntent(Intent intent) {
+        Uri data = intent.getData();
+        if (data != null && "dropp".equals(data.getScheme()) && "auth".equals(data.getHost())) {
+            String token = data.getQueryParameter("session_token");
+            String userId = data.getQueryParameter("user_id");
+            if (token != null && userId != null) {
+                sessionManager.saveSession(token, userId);
+            }
         }
     }
 
@@ -88,28 +109,31 @@ public class MainActivity extends AppCompatActivity {
         NavController navController = Navigation.findNavController(this, R.id.nav_host_fragment_content_main);
         appBarConfiguration = new AppBarConfiguration.Builder(navController.getGraph()).build();
         NavigationUI.setupActionBarWithNavController(this, navController, appBarConfiguration);
-
-        binding.fab.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                // For now, let's just clear the session for testing purposes
-                sessionManager.clearSession();
-                recreate();
-            }
-        });
     }
 
     @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        Uri data = intent.getData();
-        if (data != null && data.getScheme().equals("https") && data.getHost().equals("dropp.yangm.tech")) {
-            String token = data.getQueryParameter("token");
-            if (token != null) {
-                sessionManager.saveSessionToken(token);
-                recreate();
-            }
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.menu_main, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        MenuItem logoutItem = menu.findItem(R.id.action_logout);
+        if (logoutItem != null) {
+            logoutItem.setVisible(sessionManager.isLoggedIn());
         }
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_logout) {
+            sessionManager.clearSession();
+            recreate();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
     }
 
     @Override

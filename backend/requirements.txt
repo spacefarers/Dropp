@@ -4,3 +4,4 @@ pymongo
 python-dotenv
 vercel-blob
 firebase-admin
+PyJWT

@@ -12,12 +12,14 @@ from flask import (
     request,
 )
 
-from .firebase_auth import FirebaseAuthError, FirebaseAuthService, FirebaseUser
+from .firebase_auth import FirebaseAuthError, FirebaseAuthService
+from .jwt_auth import JWTAuthError, JWTAuthService
 from .repository import (
     check_storage_available,
     decrement_storage_usage,
     delete_file_by_id,
     get_file_by_id,
+    get_or_create_user_storage,
     increment_storage_usage,
     list_files_for_user,
     record_completed_upload,
@@ -29,22 +31,18 @@ api_bp = Blueprint("api", __name__)
 
 
 def _resolve_user_id() -> str:
-    token = _extract_firebase_token()
+    token = _extract_bearer_token()
     if not token:
-        abort(HTTPStatus.UNAUTHORIZED, description="Firebase session token is required.")
+        abort(HTTPStatus.UNAUTHORIZED, description="Session token invalid or missing.")
 
-    firebase_user = _verify_firebase_token(token)
-    return firebase_user.user_id
-
-
-def _verify_firebase_token(token: str) -> FirebaseUser:
     try:
-        return _firebase_service().verify_token(token)
-    except FirebaseAuthError as exc:
+        session = _jwt_service().verify_token(token)
+        return session.user_id
+    except JWTAuthError as exc:
         abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
 
 
-def _extract_firebase_token() -> Optional[str]:
+def _extract_bearer_token() -> Optional[str]:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.lower().startswith("bearer "):
         return auth_header.split(" ", 1)[1].strip() or None
@@ -55,6 +53,12 @@ def _extract_firebase_token() -> Optional[str]:
 def _firebase_service() -> FirebaseAuthService:
     service_account_base64 = current_app.config.get("FIREBASE_SERVICE_ACCOUNT_BASE64")
     return FirebaseAuthService(service_account_base64)
+
+
+def _jwt_service() -> JWTAuthService:
+    secret_key = current_app.config.get("JWT_SECRET_KEY")
+    ttl_seconds = int(current_app.config.get("JWT_TTL_SECONDS", 0) or 0)
+    return JWTAuthService(secret_key=secret_key, ttl_seconds=ttl_seconds)
 
 
 @api_bp.get("/")
@@ -68,11 +72,7 @@ def healthcheck() -> Dict[str, Any]:
 
 @api_bp.post("/auth/firebase/session")
 def firebase_finalize_session() -> Response:
-    auth_header = request.headers.get("Authorization", "")
-    request_token = None
-
-    if auth_header.lower().startswith("bearer "):
-        request_token = auth_header.split(" ", 1)[1].strip() or None
+    request_token = _extract_bearer_token()
 
     if not request_token:
         payload = request.get_json(silent=True) or {}
@@ -86,20 +86,29 @@ def firebase_finalize_session() -> Response:
     except FirebaseAuthError as exc:
         abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
 
+    session_token = _jwt_service().create_token(
+        user_id=firebase_user.user_id,
+        email=firebase_user.email,
+        display_name=firebase_user.display_name,
+    )
+
     session_doc = record_or_update_session(
         current_app.mongo_db,
         user_id=firebase_user.user_id,
-        session_token=request_token,
+        session_token=session_token,
         email=firebase_user.email,
     )
 
+    token_ttl = current_app.config.get("JWT_TTL_SECONDS") or None
+
     return jsonify(
         {
-            "session_token": request_token,
+            "session_token": session_token,
             "user_id": firebase_user.user_id,
             "email": firebase_user.email,
             "display_name": firebase_user.display_name,
             "session_id": session_doc.get("id"),
+            "expires_in": token_ttl,
         }
     )
 
@@ -108,7 +117,17 @@ def firebase_finalize_session() -> Response:
 def list_files() -> Response:
     user_id = _resolve_user_id()
     files = list_files_for_user(current_app.mongo_db, user_id=user_id)
-    return jsonify({"files": files})
+
+    # Get user storage information
+    user_storage = get_or_create_user_storage(current_app.mongo_db, user_id=user_id)
+
+    return jsonify({
+        "files": files,
+        "storage": {
+            "used": user_storage.get("storage_used", 0),
+            "cap": user_storage.get("storage_cap", 100 * 1024 * 1024)
+        }
+    })
 
 
 @api_bp.post("/upload/")
