@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import jwt
@@ -25,11 +25,10 @@ class JWTAuthService:
 
     _algorithm = "HS256"
 
-    def __init__(self, *, secret_key: str, ttl_seconds: int):
+    def __init__(self, *, secret_key: str):
         if not secret_key:
             raise JWTAuthError("Missing JWT secret key.")
         self._secret_key = secret_key
-        self._ttl_seconds = ttl_seconds
 
     def create_token(
         self,
@@ -48,10 +47,6 @@ class JWTAuthService:
             "display_name": display_name,
             "iat": int(now.timestamp()),
         }
-
-        if self._ttl_seconds > 0:
-            expires_at = now + timedelta(seconds=self._ttl_seconds)
-            payload["exp"] = int(expires_at.timestamp())
 
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
 

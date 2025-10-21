@@ -5,7 +5,7 @@ import './Login.css'
 const DEFAULT_APP_REDIRECT_URI = 'dropp://auth/callback'
 const backendBaseUrl = 'https://droppapi.yangm.tech'
 const envAppRedirectUri = (import.meta.env.VITE_APP_REDIRECT_URI || '').trim()
-const finalizePath = import.meta.env.VITE_AUTH_FINALIZE_PATH || '/auth/firebase/session'
+const finalizePath = '/auth/firebase/session'
 const RETURNING_STATUS = 'Returning to Dropp…'
 
 const buildBackendUrl = (path) => {
@@ -63,7 +63,6 @@ export default function Login() {
 
         try {
             const token = await user.getIdToken()
-            console.log(buildBackendUrl(finalizePath))
             const response = await fetch(buildBackendUrl(finalizePath), {
                 method: 'POST',
                 headers: {
@@ -88,6 +87,10 @@ export default function Login() {
                 payload = {}
             }
 
+            // Extract the JWT token from the backend response
+            const jwtToken = payload.session_token ?? payload.sessionToken ?? payload.token
+            console.log('JWT token received from backend:', jwtToken)
+
             setFinalized(true)
             setStatus(RETURNING_STATUS)
             setShowSuccessBanner(true)
@@ -103,11 +106,12 @@ export default function Login() {
             }
 
             const fallbackParams = {
-                session_token: payload.session_token ?? payload.sessionToken ?? token,
-                user_id: payload.user_id ?? payload.userId ?? user.uid,
-                email: payload.email ?? user.email ?? undefined,
-                session_id: payload.session_id ?? payload.sessionId ?? undefined,
-                display_name: payload.display_name ?? payload.displayName ?? user.displayName ?? payload.email ?? payload.user_id ?? undefined,
+                session_token: jwtToken,
+                user_id: payload.user_id,
+                email: payload.email,
+                session_id: payload.session_id,
+                display_name: payload.display_name,
+                expires_in: payload.expires_in,
             }
 
             const redirectParams = {...payload}

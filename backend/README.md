@@ -23,7 +23,6 @@ Flask-based backend service that issues pre-signed upload/download URLs for Verc
 | `UPLOAD_POST_TTL_SECONDS` | TTL for upload URLs (default 3600). |
 | `CORS_ALLOWED_ORIGINS` | Optional comma-separated list of allowed origins for cross-site requests (e.g. `https://dropp.yangm.tech,https://app.dropp.yangm.tech`). Defaults to localhost + production web domain. |
 | `JWT_SECRET_KEY` | Optional override for signing Dropp session tokens (defaults to `SECRET_KEY`). |
-| `JWT_TTL_SECONDS` | Lifespan in seconds for Dropp session tokens (default 604800). |
 
 ## API Overview
 

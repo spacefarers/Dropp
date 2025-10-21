@@ -57,8 +57,7 @@ def _firebase_service() -> FirebaseAuthService:
 
 def _jwt_service() -> JWTAuthService:
     secret_key = current_app.config.get("JWT_SECRET_KEY")
-    ttl_seconds = int(current_app.config.get("JWT_TTL_SECONDS", 0) or 0)
-    return JWTAuthService(secret_key=secret_key, ttl_seconds=ttl_seconds)
+    return JWTAuthService(secret_key=secret_key)
 
 
 @api_bp.get("/")
@@ -99,8 +98,6 @@ def firebase_finalize_session() -> Response:
         email=firebase_user.email,
     )
 
-    token_ttl = current_app.config.get("JWT_TTL_SECONDS") or None
-
     return jsonify(
         {
             "session_token": session_token,
@@ -108,7 +105,6 @@ def firebase_finalize_session() -> Response:
             "email": firebase_user.email,
             "display_name": firebase_user.display_name,
             "session_id": session_doc.get("id"),
-            "expires_in": token_ttl,
         }
     )
 

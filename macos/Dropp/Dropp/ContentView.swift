@@ -36,9 +36,11 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .zIndex(1)
 
-                // Bottom-left controls: Refresh + Hide + Settings
+                // Bottom-left controls: Refresh (when logged in) + Hide + Settings
                 HStack(spacing: 8) {
-                    refreshButton
+                    if auth.isLoggedIn {
+                        refreshButton
+                    }
                     hideButton
                     settingsButton
                 }
@@ -47,15 +49,17 @@ struct ContentView: View {
                 .zIndex(2)
 
                 if isSettingsMenuPresented {
+                    // Dismiss area
                     Color.black.opacity(0.001)
                         .ignoresSafeArea()
                         .onTapGesture { isSettingsMenuPresented = false }
                         .zIndex(1)
 
-                    // Show the menu slightly above and to the right of the button
+                    // Settings menu shown just above the buttons in the bottom-left
                     settingsMenu
-                        .offset(x: 10, y: -48)
+                        .offset(x: 10, y: -48) // small right shift, pop upward from bottom-left
                         .zIndex(2)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
             }
         }
@@ -126,8 +130,6 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .help("Refresh Cloud State")
-        .opacity(auth.isLoggedIn ? 1.0 : 0.35)
-        .disabled(!auth.isLoggedIn)
     }
 
     private var hideButton: some View {
@@ -217,33 +219,13 @@ struct ContentView: View {
 
     // MARK: - Colors
 
-    private var backgroundColor: Color {
-        Palette.background
-    }
-
-    private var surfaceColor: Color {
-        Palette.surface
-    }
-
-    private var iconColor: Color {
-        Palette.icon
-    }
-
-    private var borderColor: Color {
-        Palette.border
-    }
-
-    private var highlightBorderColor: Color {
-        Palette.accent.opacity(0.35)
-    }
-
-    private var shadowColor: Color {
-        Palette.shadow
-    }
-
-    private var accentColor: Color {
-        Palette.accent
-    }
+    private var backgroundColor: Color { Palette.background }
+    private var surfaceColor: Color { Palette.surface }
+    private var iconColor: Color { Palette.icon }
+    private var borderColor: Color { Palette.border }
+    private var highlightBorderColor: Color { Palette.accent.opacity(0.35) }
+    private var shadowColor: Color { Palette.shadow }
+    private var accentColor: Color { Palette.accent }
 
     // MARK: - Actions
 

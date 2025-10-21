@@ -19,7 +19,6 @@ def create_app(preconfigured: Config | None = None) -> Flask:
     app.config.from_mapping(
         SECRET_KEY=config.secret_key,
         JWT_SECRET_KEY=jwt_secret_key,
-        JWT_TTL_SECONDS=config.jwt_ttl_seconds,
         BLOB_READ_WRITE_TOKEN=config.blob_read_write_token,
         PRESIGN_TTL_SECONDS=config.presign_ttl_seconds,
         UPLOAD_POST_TTL_SECONDS=config.upload_post_ttl_seconds,
@@ -38,7 +37,13 @@ def create_app(preconfigured: Config | None = None) -> Flask:
         "https://dropp.yangm.tech",
     )
     cors_origins = config.cors_allowed_origins or default_cors_origins
-    CORS(app, supports_credentials=True, origins=cors_origins)
+    CORS(
+        app,
+        supports_credentials=True,
+        origins=cors_origins,
+        allow_headers=["Content-Type", "Authorization"],
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    )
     app.register_blueprint(api_bp)
 
     return app
