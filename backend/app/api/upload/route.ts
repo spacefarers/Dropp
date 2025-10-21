@@ -51,7 +51,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           user_id: payload.userId,
           name: payload.origName || blob.pathname,
           url: blob.url,
-          size: blob.size,
           content_type: blob.contentType,
           created_at: new Date().toISOString(),
           status: 'complete',

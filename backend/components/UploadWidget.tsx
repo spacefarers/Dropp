@@ -1,11 +1,19 @@
 'use client';
 
-import { upload, type PutBlobResult } from '@vercel/blob/client';
+import { upload } from '@vercel/blob/client';
 import { useRef, useState } from 'react';
+
+type BlobResult = {
+  url: string;
+  downloadUrl: string;
+  pathname: string;
+  contentType?: string;
+  contentDisposition: string;
+};
 
 export default function UploadWidget() {
   const inputFileRef = useRef<HTMLInputElement>(null);
-  const [blob, setBlob] = useState<PutBlobResult | null>(null);
+  const [blob, setBlob] = useState<BlobResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
@@ -16,8 +24,8 @@ export default function UploadWidget() {
     const file = inputFileRef.current.files[0];
     try {
       const newBlob = await upload(file.name, file, {
+        access: 'public',
         handleUploadUrl: '/api/upload', // our route above
-        // access: 'public', // set if you want public blobs
       });
       setBlob(newBlob);
     } catch (err: any) {
