@@ -34,7 +34,7 @@ enum DroppAPIError: Error, LocalizedError {
 }
 
 struct DroppAPI {
-    static let baseURL = URL(string: "https://droppapi.yangm.tech")!
+    static let baseURL = URL(string: "https://dropp.yangm.tech/api")!
 }
 
 @MainActor
@@ -65,7 +65,7 @@ final class DroppAPIClient {
         let filename = item.cloudInfo?.filename ?? fileURL.lastPathComponent
         guard !filename.isEmpty else { throw DroppAPIError.noFilename }
 
-        // Read data robustly
+        // Read file data
         let fileData: Data
         do {
             fileData = try await readFileData(at: fileURL)
@@ -75,33 +75,23 @@ final class DroppAPIClient {
         }
 
         let contentType = item.cloudInfo?.contentType ?? "application/octet-stream"
-        let size = item.cloudInfo?.size ?? Int64(fileData.count)
 
-        let url = DroppAPI.baseURL.appendingPathComponent("upload", isDirectory: true)
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        auth.authorize(&request)
-        debugAssertAuthorizationHeader(request)
+        // STEP 1: Get upload token from backend
+        let uploadToken = try await getUploadToken(
+            filename: filename,
+            contentType: contentType,
+            fileSize: fileData.count
+        )
 
-        let boundary = "Boundary-\(UUID().uuidString)"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try makeMultipartBody(
-            boundary: boundary,
-            fields: [
-                "filename": filename,
-                "content_type": contentType,
-                "size": String(size)
-            ],
-            fileField: "file",
-            fileFilename: filename,
-            fileMimeType: contentType,
+        // STEP 2: Upload directly to Vercel
+        try await uploadToVercel(
+            token: uploadToken,
+            filename: filename,
+            contentType: contentType,
             fileData: fileData
         )
 
-        let t0 = Date()
-        let (data, response) = try await session.data(for: request)
-        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "upload")
-        try validateResponse(response, data: data)
+        NSLog("✅ File uploaded successfully: \(filename)")
     }
 
     // Remove a cloud file by id.
@@ -156,6 +146,61 @@ final class DroppAPIClient {
         return (files, decoded.storage.used, decoded.storage.cap)
     }
 
+    // MARK: - Upload Helpers
+
+    private func getUploadToken(
+        filename: String,
+        contentType: String,
+        fileSize: Int
+    ) async throws -> String {
+        try requireAuth()
+
+        let url = DroppAPI.baseURL.appendingPathComponent("upload/token", isDirectory: true)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        auth.authorize(&request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let body = [
+            "filename": filename,
+            "contentType": contentType,
+            "maximumSizeInBytes": fileSize * 2  // Allow 2x for safety
+        ] as [String : Any]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let t0 = Date()
+        let (data, response) = try await session.data(for: request)
+        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "get-upload-token")
+        try validateResponse(response, data: data)
+
+        let tokenResponse = try JSONDecoder().decode(TokenResponse.self, from: data)
+        return tokenResponse.token
+    }
+
+    private func uploadToVercel(
+        token: String,
+        filename: String,
+        contentType: String,
+        fileData: Data
+    ) async throws {
+        let url = URL(string: "https://blob.vercelusercontent.com/upload")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.httpBody = fileData
+
+        NSLog("➡️ [upload] POST \(url.absoluteString) • filename=\(filename) • size=\(fileData.count)")
+
+        let t0 = Date()
+        let (data, response) = try await session.data(for: request)
+        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "upload-to-vercel")
+        try validateResponse(response, data: data)
+
+        NSLog("✅ Vercel accepted upload: \(filename)")
+    }
+
     // MARK: - Helpers
 
     private func requireAuth() throws {
@@ -175,39 +220,6 @@ final class DroppAPIClient {
             }
             throw DroppAPIError.badResponse(status: http.statusCode, body: body)
         }
-    }
-
-    private func makeMultipartBody(
-        boundary: String,
-        fields: [String: String],
-        fileField: String,
-        fileFilename: String,
-        fileMimeType: String,
-        fileData: Data
-    ) throws -> Data {
-        var body = Data()
-        let lineBreak = "\r\n"
-
-        func append(_ string: String) {
-            if let data = string.data(using: .utf8) {
-                body.append(data)
-            }
-        }
-
-        for (key, value) in fields {
-            append("--\(boundary)\(lineBreak)")
-            append("Content-Disposition: form-data; name=\"\(key)\"\(lineBreak)\(lineBreak)")
-            append("\(value)\(lineBreak)")
-        }
-
-        append("--\(boundary)\(lineBreak)")
-        append("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileFilename)\"\(lineBreak)")
-        append("Content-Type: \(fileMimeType)\(lineBreak)\(lineBreak)")
-        body.append(fileData)
-        append(lineBreak)
-
-        append("--\(boundary)--\(lineBreak)")
-        return body
     }
 
     // Robust file read that handles iCloud/File Provider and coordinates access
@@ -325,6 +337,11 @@ final class DroppAPIClient {
 }
 
 // MARK: - DTOs
+
+private struct TokenResponse: Decodable {
+    let token: String
+    let uploadUrl: String?
+}
 
 private struct ListResponse: Decodable {
     let files: [CloudFileInfoDTO]
