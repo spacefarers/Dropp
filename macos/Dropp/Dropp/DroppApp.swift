@@ -8,6 +8,7 @@
 import SwiftUI
 import AppKit
 import QuartzCore
+import Carbon.HIToolbox
 
 extension Notification.Name {
     static let requestForceHideWindow = Notification.Name("RequestForceHideWindow")
@@ -15,7 +16,7 @@ extension Notification.Name {
 
 final class FileDragStartObserver {
     private var monitors: [Any] = []
-    private var lastFiredChangeCount: Int = -1   // which drag we've already reported
+    private var lastFiredChangeCount: Int = -1
     private var isDragging = false
 
     func start() {
@@ -77,7 +78,6 @@ final class WindowVisibilityController {
     }
 
     func setVisible(_ visible: Bool, force: Bool = false) {
-        // Never hide the window if there are items in the shelf, unless forced
         if !visible, !force, let shelf = shelf, !shelf.items.isEmpty {
             return
         }
@@ -142,11 +142,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasShownDiskAccessAlert = false
     private var globalMouseDownMonitor: Any?
 
-    // Inject AuthManager singleton
+    // Hotkey storage
+    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyEventHandler: EventHandlerRef?
+
     private let auth = AuthManager.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Load any persisted auth state
         auth.loadFromStorage()
 
         promptForDiskAccessIfNeeded()
@@ -178,9 +180,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireDragCallbacks()
         installObservers()
         installGlobalMouseMonitor()
+        registerGlobalHotKeyF10()
 
-        // Surface the window immediately on launch.
         showWindowSuppressingActivationUpdate()
+
+        Task { @MainActor in
+            await refreshCloudInventoryOnLaunch()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -191,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(monitor)
             globalMouseDownMonitor = nil
         }
+        unregisterGlobalHotKey()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -199,13 +206,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    // Handle custom URL scheme redirects, e.g., dropp://auth?session_token=...&user_id=...
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             if AuthManager.shared.handleCallback(url: url) {
-                // Bring app to front and show the shelf window after successful login
                 NSApp.activate(ignoringOtherApps: true)
                 showWindowSuppressingActivationUpdate()
+
+                Task { @MainActor in
+                    await refreshCloudInventoryOnLaunch()
+                }
             }
         }
     }
@@ -220,7 +229,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileDragObserver.onFileDragEnd = { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
-                // Allow the drop callback to finish mutating the shelf before evaluating.
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 self.visibilityController.setVisible(false)
             }
@@ -279,7 +287,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
-        // Hide immediately when the shelf becomes empty (e.g., after removing the last item).
         notificationTokens.append(
             NotificationCenter.default.addObserver(
                 forName: .shelfBecameEmpty,
@@ -290,7 +297,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
-        // Force hide on request from UI
         notificationTokens.append(
             NotificationCenter.default.addObserver(
                 forName: .requestForceHideWindow,
@@ -330,20 +336,139 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         visibilityController.setVisible(true)
     }
 
+    // MARK: - Global Hotkey (F10)
+
+    private func registerGlobalHotKeyF10() {
+        // Install a handler for hotkey pressed events
+        var eventSpec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        let userData = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        let statusInstall = InstallEventHandler(GetApplicationEventTarget(), { (_, event, userData) -> OSStatus in
+            guard let userData = userData else { return noErr }
+            let delegate = Unmanaged<AppDelegate>.fromOpaque(userData).takeUnretainedValue()
+            delegate.handleGlobalHotKey()
+            return noErr
+        }, 1, &eventSpec, userData, &hotKeyEventHandler)
+
+        if statusInstall != noErr {
+            NSLog("Failed to install hotkey event handler: \(statusInstall)")
+            hotKeyEventHandler = nil
+            return
+        }
+
+        // Register the F10 hotkey (no modifiers)
+        var hotKeyID = EventHotKeyID(signature: OSType(0x44525050), id: 1) // 'DRPP'
+        let statusReg = RegisterEventHotKey(UInt32(kVK_F10), 0, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+
+        if statusReg != noErr {
+            NSLog("Failed to register F10 hotkey: \(statusReg)")
+            // Clean up handler if registration failed
+            if let handler = hotKeyEventHandler {
+                RemoveEventHandler(handler)
+                hotKeyEventHandler = nil
+            }
+            hotKeyRef = nil
+        } else {
+            NSLog("Registered global hotkey: F10")
+        }
+    }
+
+    private func unregisterGlobalHotKey() {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
+        }
+        if let handler = hotKeyEventHandler {
+            RemoveEventHandler(handler)
+            hotKeyEventHandler = nil
+        }
+    }
+
+    private func handleGlobalHotKey() {
+        let currentlyVisible = mainWindow?.isVisible ?? false
+        let newVisible = !currentlyVisible
+        visibilityController.setVisible(newVisible, force: true)
+        if newVisible {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    // Prompt user to grant Full Disk Access if we detect restricted access.
     private func promptForDiskAccessIfNeeded() {
         guard !hasShownDiskAccessAlert else { return }
-        guard !DiskAccessController.shared.isAccessGranted() else { return }
+
+        let granted = DiskAccessController.shared.isAccessGranted()
+        guard !granted else { return }
+
         hasShownDiskAccessAlert = true
+
         let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Dropp Needs Full Disk Access"
-        alert.informativeText = "Dropp can only pin and move your files if Full Disk Access is enabled. Without it, the shelf cannot stay in sync."
+        alert.alertStyle = .informational
+        alert.messageText = "Additional Disk Access Recommended"
+        alert.informativeText = """
+        To work reliably with files across your Mac (including some protected locations), Dropp may require Full Disk Access.
+
+        You can grant this in System Settings → Privacy & Security → Full Disk Access. This is optional, but without it certain files may be unreadable.
+        """
         alert.addButton(withTitle: "Open Settings")
-        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Not Now")
+
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             DiskAccessController.shared.requestAccess()
+        }
+    }
+
+    // MARK: - Initial cloud sync
+
+    private func refreshCloudInventoryOnLaunch() async {
+        guard auth.isLoggedIn else { return }
+        do {
+            let result = try await DroppAPIClient.shared.list()
+            shelf.cloudStorageUsed = result.storageUsed
+            shelf.cloudStorageCap = result.storageCap
+
+            let cloudByName: [String: ShelfItem.CloudFileInfo] = Dictionary(uniqueKeysWithValues: result.files.map { ($0.filename, $0) })
+            let cloudById: [String: ShelfItem.CloudFileInfo] = Dictionary(uniqueKeysWithValues: result.files.compactMap { info in
+                if let id = info.id { return (id, info) } else { return nil }
+            })
+
+            let existingNames = Set(shelf.items.map { $0.displayName })
+
+            for item in shelf.items {
+                if let linkedId = CloudLinkStore.shared.lookupCloudId(forBookmarkKey: item.bookmarkKey),
+                   let info = cloudById[linkedId] {
+                    item.cloudInfo = info
+                    item.cloudState = item.isPhantom ? .cloudOnly : .both
+                    continue
+                }
+
+                let name = item.displayName
+                if let info = cloudByName[name] {
+                    item.cloudInfo = info
+                    item.cloudState = item.isPhantom ? .cloudOnly : .both
+                } else {
+                    item.cloudState = item.isPhantom ? .cloudOnly : .localOnly
+                }
+            }
+
+            for info in result.files where !existingNames.contains(info.filename) {
+                shelf.addPhantomCloudItem(
+                    filename: info.filename,
+                    size: info.size,
+                    contentType: info.contentType,
+                    id: info.id,
+                    downloadURL: info.downloadURL
+                )
+            }
+
+            if !result.files.isEmpty {
+                visibilityController.setVisible(true)
+            }
+
+            NSLog("Initial cloud inventory synced: \(result.files.count) file(s) in cloud.")
+        } catch {
+            NSLog("Initial cloud inventory sync failed: \(error.localizedDescription)")
         }
     }
 }
@@ -411,7 +536,6 @@ private enum WindowLayout {
 
         window.setFrame(frame, display: true, animate: false)
 
-        // Use a floating level so popups/menus can appear above.
         window.level = .floating
         window.hasShadow = true
 
@@ -428,4 +552,3 @@ private enum WindowLayout {
         }
     }
 }
-

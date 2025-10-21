@@ -51,7 +51,6 @@ final class DroppAPIClient {
 
     // MARK: - Public API
 
-    // Upload a file from disk using the ShelfItem’s URL and optional metadata.
     func upload(item: ShelfItem) async throws {
         try requireAuth()
 
@@ -66,7 +65,7 @@ final class DroppAPIClient {
         let filename = item.cloudInfo?.filename ?? fileURL.lastPathComponent
         guard !filename.isEmpty else { throw DroppAPIError.noFilename }
 
-        // Read data robustly (handles iCloud/File Provider and coordination)
+        // Read data robustly
         let fileData: Data
         do {
             fileData = try await readFileData(at: fileURL)
@@ -105,50 +104,26 @@ final class DroppAPIClient {
         try validateResponse(response, data: data)
     }
 
-    // Download by filename (from the item’s cloud info). Returns raw Data.
-    func download(info: ShelfItem.CloudFileInfo) async throws -> Data {
-        try requireAuth()
-
-        guard var components = URLComponents(
-            url: DroppAPI.baseURL.appendingPathComponent("download", isDirectory: true),
-            resolvingAgainstBaseURL: false
-        ) else {
-            throw DroppAPIError.invalidURL
-        }
-        components.queryItems = [
-            URLQueryItem(name: "filename", value: info.filename)
-        ]
-        guard let url = components.url else { throw DroppAPIError.invalidURL }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        auth.authorize(&request)
-        debugAssertAuthorizationHeader(request)
-
-        let t0 = Date()
-        let (data, response) = try await session.data(for: request)
-        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "download")
-        try validateResponse(response, data: data)
-        return data
-    }
-
-    // Remove a cloud file by filename.
+    // Remove a cloud file by id.
     func remove(info: ShelfItem.CloudFileInfo) async throws {
         try requireAuth()
 
-        let url = DroppAPI.baseURL.appendingPathComponent("remove", isDirectory: true)
+        guard let id = info.id, !id.isEmpty else {
+            throw DroppAPIError.invalidURL
+        }
+
+        let url = DroppAPI.baseURL.appendingPathComponent("files/\(id)", isDirectory: false)
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        request.httpMethod = "DELETE"
         auth.authorize(&request)
         debugAssertAuthorizationHeader(request)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let payload: [String: String] = ["filename": info.filename]
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        // Pre-flight log indicating we are sending the delete to backend
+        NSLog("➡️ [delete] DELETE \(url.absoluteString) • id=\(id) • filename=\(info.filename)")
 
         let t0 = Date()
         let (data, response) = try await session.data(for: request)
-        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "remove")
+        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "delete")
         try validateResponse(response, data: data)
     }
 
@@ -170,7 +145,13 @@ final class DroppAPIClient {
 
         let decoded = try JSONDecoder().decode(ListResponse.self, from: data)
         let files = decoded.files.map { dto in
-            ShelfItem.CloudFileInfo(filename: dto.filename, size: dto.size, contentType: dto.contentType)
+            ShelfItem.CloudFileInfo(
+                filename: dto.filename,
+                size: dto.size,
+                contentType: dto.contentType,
+                id: dto.id,
+                downloadURL: dto.blobURL
+            )
         }
         return (files, decoded.storage.used, decoded.storage.cap)
     }
@@ -189,7 +170,6 @@ final class DroppAPIClient {
         }
         guard (200..<300).contains(http.statusCode) else {
             let body = data.flatMap { String(data: $0, encoding: .utf8) }
-            // Map 401 to a clearer error
             if http.statusCode == 401 {
                 throw DroppAPIError.unauthorized
             }
@@ -232,18 +212,15 @@ final class DroppAPIClient {
 
     // Robust file read that handles iCloud/File Provider and coordinates access
     private func readFileData(at url: URL) async throws -> Data {
-        // Reject plain directories (packages may still be directories; allow them)
         let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey])
         if values.isDirectory == true && values.isPackage == false {
             throw DroppAPIError.fileReadFailed
         }
 
-        // Ensure iCloud files are downloaded locally
         if values.isUbiquitousItem == true {
             try await ensureUbiquitousItemIsDownloaded(at: url)
         }
 
-        // Coordinate the read to cooperate with File Providers
         return try coordinatedRead(at: url)
     }
 
@@ -271,28 +248,24 @@ final class DroppAPIClient {
     }
 
     private func ensureUbiquitousItemIsDownloaded(at url: URL) async throws {
-        // Kick off download if needed
         do {
             try FileManager.default.startDownloadingUbiquitousItem(at: url)
         } catch {
             // It may already be local; continue to poll status
         }
 
-        // Poll until status == .current or timeout
         let timeout: TimeInterval = 30
         let start = Date()
         while Date().timeIntervalSince(start) < timeout {
             if let status = try? ubiquitousStatus(for: url), status == .current {
                 return
             }
-            try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s
+            try? await Task.sleep(nanoseconds: 200_000_000)
         }
-        // If still not current, attempt read anyway; let it fail if unavailable
     }
 
     // MARK: - Logging
 
-    // Centralized logging for all backend responses
     private func logNetwork(request: URLRequest, response: URLResponse, data: Data?, startedAt: Date, purpose: String) {
         guard let http = response as? HTTPURLResponse else {
             NSLog("↩️ [\(purpose)] Non-HTTP response from \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "<nil>")")
@@ -304,12 +277,10 @@ final class DroppAPIClient {
         let urlString = request.url?.absoluteString ?? "<nil>"
         let status = http.statusCode
 
-        // Headers (response)
         let headerLines: [String] = http.allHeaderFields.compactMap { key, value in
             "\(String(describing: key)): \(String(describing: value))"
         }.sorted()
 
-        // Decide how to log body
         let contentType = (http.allHeaderFields["Content-Type"] as? String) ?? (http.allHeaderFields["content-type"] as? String) ?? ""
         let isLikelyText = contentType.contains("json")
             || contentType.contains("text/")
@@ -324,7 +295,6 @@ final class DroppAPIClient {
                 let truncated = data.count > maxPreviewBytes ? " …(truncated)" : ""
                 bodyPreview = "Body (\(data.count) bytes, text):\n\(text)\(truncated)"
             } else {
-                // Hex preview for binary
                 let prefix = data.prefix(min(64, data.count))
                 let hex = prefix.map { String(format: "%02x", $0) }.joined(separator: " ")
                 let truncated = data.count > prefix.count ? " …(truncated)" : ""
@@ -370,10 +340,14 @@ private struct CloudFileInfoDTO: Decodable {
     let filename: String
     let size: Int64
     let contentType: String
+    let id: String?
+    let blobURL: URL?
 
     private enum CodingKeys: String, CodingKey {
         case filename
         case size
         case contentType = "content_type"
+        case id
+        case blobURL = "blob_url"
     }
 }

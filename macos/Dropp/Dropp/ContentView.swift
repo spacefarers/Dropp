@@ -161,6 +161,7 @@ struct ContentView: View {
                 Image(systemName: "eye.slash")
             }
             .foregroundStyle(iconColor)
+            .frame(width: 28, height: 28) // match refresh footprint
             .padding(6)
         }
         .buttonStyle(.plain)
@@ -176,6 +177,7 @@ struct ContentView: View {
                 Image(systemName: "gearshape.fill")
             }
             .foregroundStyle(iconColor)
+            .frame(width: 28, height: 28) // match refresh footprint
             .padding(6)
         }
         .buttonStyle(.plain)
@@ -272,6 +274,7 @@ struct ContentView: View {
 
     private func revealInFinder(_ item: ShelfItem) {
         #if os(macOS)
+        guard item.cloudState != .cloudOnly else { return }
         let url = item.resolvedURL()
         NSWorkspace.shared.activateFileViewerSelecting([url])
         #endif
@@ -287,26 +290,16 @@ struct ContentView: View {
             shelf.cloudStorageUsed = result.storageUsed
             shelf.cloudStorageCap = result.storageCap
 
-            // Build a lookup for cloud files by filename
-            let cloudByName: [String: ShelfItem.CloudFileInfo] = Dictionary(
-                uniqueKeysWithValues: result.files.map { ($0.filename, $0) }
-            )
-
-            // Update each local item’s state
-            for item in shelf.items {
-                let localName = item.resolvedURL().lastPathComponent
-                if let info = cloudByName[localName] {
-                    item.cloudInfo = info
-                    item.cloudState = .both
-                } else {
-                    // Not present in cloud; keep/seed minimal info
-                    item.cloudInfo = ShelfItem.CloudFileInfo(
-                        filename: localName,
-                        size: (try? item.resolvedURL().resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0,
-                        contentType: "application/octet-stream"
-                    )
-                    item.cloudState = .localOnly
-                }
+            // Do not attempt to correlate existing local items with cloud inventory.
+            // Just add phantom items for every cloud file.
+            for info in result.files {
+                shelf.addPhantomCloudItem(
+                    filename: info.filename,
+                    size: info.size,
+                    contentType: info.contentType,
+                    id: info.id,
+                    downloadURL: info.downloadURL
+                )
             }
         } catch {
             NSLog("Failed to refresh cloud inventory: \(error.localizedDescription)")
@@ -351,14 +344,12 @@ private struct ShelfItemRow: View {
                 onRemove(movedItem)
             }) {
                 VStack(spacing: 8) {
-                    thumbnail(for: url)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .shadow(color: shadowColor.opacity(0.12), radius: 6, y: 3)
+                    thumbnailView(for: url, item: item)
+                        .frame(width: 44, height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: shadowColor.opacity(0.12), radius: 6, y: 3)
 
-                    Text(truncatedDisplayName(for: url))
+                    Text(truncatedDisplayName(for: item))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Color.primary)
                         .multilineTextAlignment(.center)
@@ -369,10 +360,12 @@ private struct ShelfItemRow: View {
             .frame(width: 90, alignment: .leading)
 
             VStack(spacing: 6) {
-                // Cloud action (only shown when logged in)
+                // Cloud action slot
                 if auth.isLoggedIn {
-                    if item.isCloudBusy {
-                        // Spinner styled like the action button to keep layout/feel identical
+                    if item.cloudActivity == .uploading
+                        || item.cloudActivity == .downloading
+                        || (item.cloudActivity == .removing && item.cloudState == .both) {
+                        // Show spinner on cloud button while upload/download or when cloud delete is initiated from cloud button
                         ZStack {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(iconBackgroundColor)
@@ -380,7 +373,7 @@ private struct ShelfItemRow: View {
                             ProgressView()
                                 .progressViewStyle(.circular)
                                 .controlSize(.small)
-                                .scaleEffect(0.9) // visually centered for 22x22
+                                .scaleEffect(0.9)
                                 .tint(Palette.accent)
                         }
                         .frame(width: 22, height: 22)
@@ -400,30 +393,48 @@ private struct ShelfItemRow: View {
                     }
                 }
 
-                // Remove on top, Reveal below (existing)
-                ShelfActionButton(
-                    systemName: "xmark",
-                    tooltip: "Remove",
-                    backgroundColor: iconBackgroundColor,
-                    foregroundColor: Color(nsColor: .systemRed),
-                    size: 22,
-                    cornerRadius: 6
-                ) {
-                    onRemove(item)
+                // Remove slot: show spinner only when removing a cloud-only item via Remove button
+                if item.cloudActivity == .removing && item.cloudState == .cloudOnly {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(iconBackgroundColor)
+                            .shadow(color: Palette.shadow.opacity(0.18), radius: 22 * 0.28, y: 22 * 0.18)
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .controlSize(.small)
+                            .scaleEffect(0.9)
+                            .tint(Color(nsColor: .systemRed))
+                    }
+                    .frame(width: 22, height: 22)
+                    .help("Removing…")
+                } else {
+                    ShelfActionButton(
+                        systemName: "xmark",
+                        tooltip: "Remove",
+                        backgroundColor: iconBackgroundColor,
+                        foregroundColor: Color(nsColor: .systemRed),
+                        size: 22,
+                        cornerRadius: 6
+                    ) {
+                        handleRemove(item)
+                    }
+                    .disabled(item.isCloudBusy)
                 }
-                .disabled(item.isCloudBusy)
 
-                ShelfActionButton(
-                    systemName: "magnifyingglass",
-                    tooltip: "Reveal in Finder",
-                    backgroundColor: iconBackgroundColor,
-                    foregroundColor: iconColor,
-                    size: 22,
-                    cornerRadius: 6
-                ) {
-                    onReveal(item)
+                // Reveal below (hide for cloud-only phantom)
+                if item.cloudState != .cloudOnly {
+                    ShelfActionButton(
+                        systemName: "magnifyingglass",
+                        tooltip: "Reveal in Finder",
+                        backgroundColor: iconBackgroundColor,
+                        foregroundColor: iconColor,
+                        size: 22,
+                        cornerRadius: 6
+                    ) {
+                        onReveal(item)
+                    }
+                    .disabled(item.isCloudBusy)
                 }
-                .disabled(item.isCloudBusy)
             }
             .frame(width: 24)
             .opacity(isHovering ? 1 : 0)
@@ -452,13 +463,30 @@ private struct ShelfItemRow: View {
         }
     }
 
+    private func handleRemove(_ item: ShelfItem) {
+        // If cloud-only and logged in with a valid id, delete from backend first.
+        if item.cloudState == .cloudOnly, auth.isLoggedIn, let info = item.cloudInfo, let id = info.id, !id.isEmpty {
+            item.cloudActivity = .removing
+            Task { @MainActor in
+                defer { item.cloudActivity = .idle }
+                do {
+                    try await DroppAPIClient.shared.remove(info: info)
+                    onRemove(item)
+                } catch {
+                    showErrorAlert(title: "Remove Failed", message: error.localizedDescription)
+                }
+            }
+            return
+        }
+
+        // Otherwise, just remove locally.
+        onRemove(item)
+    }
+
     private func handleCloudAction(for item: ShelfItem) {
         switch item.cloudState {
         case .localOnly:
-            // Preflight quota check then upload
-            item.cloudActivity = .uploading
             Task { @MainActor in
-                defer { item.cloudActivity = .idle }
                 do {
                     let fileSize = try determineLocalFileSize(item: item)
                     let used = shelf.cloudStorageUsed
@@ -469,15 +497,20 @@ private struct ShelfItemRow: View {
                         return
                     }
 
+                    item.cloudActivity = .uploading
+                    defer { item.cloudActivity = .idle }
+
                     try await DroppAPIClient.shared.upload(item: item)
 
-                    // Update state to reflect upload
+                    // No correlation lookup after upload; just mark as both and update usage.
                     item.cloudState = .both
                     if item.cloudInfo == nil {
                         item.cloudInfo = ShelfItem.CloudFileInfo(
                             filename: item.resolvedURL().lastPathComponent,
                             size: fileSize,
-                            contentType: "application/octet-stream"
+                            contentType: "application/octet-stream",
+                            id: nil,
+                            downloadURL: nil
                         )
                     } else {
                         item.cloudInfo?.size = fileSize
@@ -488,11 +521,54 @@ private struct ShelfItemRow: View {
                 }
             }
         case .cloudOnly:
-            // TODO: Implement download wiring
-            NSLog("Download action tapped for \(item.resolvedURL().lastPathComponent)")
+            guard let info = item.cloudInfo else { return }
+            item.cloudActivity = .downloading
+            Task { @MainActor in
+                defer { item.cloudActivity = .idle }
+                do {
+                    let data: Data
+                    if let directURL = info.downloadURL {
+                        let (d, _) = try await URLSession.shared.data(from: directURL)
+                        data = d
+                    } else {
+                        // No direct URL; nothing to download from here.
+                        data = Data()
+                    }
+                    let destination = try saveDownloadedData(data, filename: info.filename)
+                    item.adoptLocalFile(at: destination)
+                } catch {
+                    showErrorAlert(title: "Download Failed", message: error.localizedDescription)
+                }
+            }
         case .both:
-            // TODO: Implement cloud remove wiring
-            NSLog("Remove-from-cloud action tapped for \(item.resolvedURL().lastPathComponent)")
+            // Cloud button means "remove from cloud" for both-state items
+            guard auth.isLoggedIn, let info = item.cloudInfo, let id = info.id, !id.isEmpty else {
+                showErrorAlert(title: "Cannot Remove from Cloud", message: "Missing sign-in or cloud file identifier.")
+                return
+            }
+            item.cloudActivity = .removing
+            Task { @MainActor in
+                defer { item.cloudActivity = .idle }
+                do {
+                    try await DroppAPIClient.shared.remove(info: info)
+
+                    // Update usage if we know the size
+                    let size = info.size
+                    if size > 0 {
+                        let newUsed = max(0, shelf.cloudStorageUsed - size)
+                        shelf.cloudStorageUsed = newUsed
+                    }
+
+                    // Strip cloud linkage and set to localOnly
+                    if item.cloudInfo != nil {
+                        item.cloudInfo?.id = nil
+                        item.cloudInfo?.downloadURL = nil
+                    }
+                    item.cloudState = .localOnly
+                } catch {
+                    showErrorAlert(title: "Remove Failed", message: error.localizedDescription)
+                }
+            }
         }
     }
 
@@ -502,6 +578,31 @@ private struct ShelfItemRow: View {
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         if let size = values.fileSize { return Int64(size) }
         return 0
+    }
+
+    private func saveDownloadedData(_ data: Data, filename: String) throws -> URL {
+        #if os(macOS)
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
+        var target = downloads.appendingPathComponent(filename)
+
+        var counter = 1
+        let base = target.deletingPathExtension().lastPathComponent
+        let ext = target.pathExtension
+        while FileManager.default.fileExists(atPath: target.path) {
+            let newName = ext.isEmpty ? "\(base) (\(counter))" : "\(base) (\(counter)).\(ext)"
+            target = downloads.appendingPathComponent(newName)
+            counter += 1
+        }
+
+        try data.write(to: target, options: .atomic)
+        return target
+        #else
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let url = docs.appendingPathComponent(filename)
+        try data.write(to: url, options: .atomic)
+        return url
+        #endif
     }
 
     private func showQuotaAlert(needed: Int64, used: Int64, cap: Int64) {
@@ -552,25 +653,45 @@ private struct ShelfItemRow: View {
         case .cloudOnly:
             return "Download from Cloud"
         case .both:
-            return "Remove from Cloud"
+            return "In Cloud and Local — Click to Remove from Cloud"
         }
     }
 
-    private func thumbnail(for url: URL) -> Image {
+    @ViewBuilder
+    private func thumbnailView(for url: URL, item: ShelfItem) -> some View {
         #if os(macOS)
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-        icon.size = NSSize(width: 64, height: 64)
-        return Image(nsImage: icon)
+        if item.cloudState == .cloudOnly {
+            CloudOnlyPlaceholderThumbnail(filename: item.displayName)
+        } else {
+            Image(nsImage: fileIcon(for: url))
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+        }
         #else
-        return Image(systemName: "doc")
+        if item.cloudState == .cloudOnly {
+            CloudOnlyPlaceholderThumbnail(filename: item.displayName)
+        } else {
+            Image(systemName: "doc")
+                .resizable()
+                .scaledToFit()
+        }
         #endif
     }
+
+    #if os(macOS)
+    private func fileIcon(for url: URL) -> NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: 64, height: 64)
+        return icon
+    }
+    #endif
 
     private var iconBackgroundColor: Color { Palette.surface.opacity(0.85) }
     private var iconColor: Color { Palette.icon }
 
-    private func truncatedDisplayName(for url: URL, maxLength: Int = 10) -> String {
-        let name = url.lastPathComponent
+    private func truncatedDisplayName(for item: ShelfItem, maxLength: Int = 10) -> String {
+        let name = item.displayName
         guard name.count > maxLength else { return name }
 
         let parts = name.split(separator: ".", omittingEmptySubsequences: false)
@@ -591,12 +712,60 @@ private struct ShelfItemRow: View {
 
     private func open(_ item: ShelfItem) {
         #if os(macOS)
+        guard item.cloudState != .cloudOnly else { return }
         let url = item.resolvedURL()
         NSWorkspace.shared.open(url)
         #endif
     }
 }
 
+private struct CloudOnlyPlaceholderThumbnail: View {
+    var filename: String?
+
+    private var fileExtension: String {
+        let name = filename ?? ""
+        let ext = URL(fileURLWithPath: name).pathExtension
+        return ext.isEmpty ? "" : ext.uppercased()
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(nsColor: .controlBackgroundColor).opacity(0.9),
+                            Color(nsColor: .windowBackgroundColor).opacity(0.9)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                )
+
+            Image(systemName: "doc")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+
+            if !fileExtension.isEmpty {
+                Text(fileExtension)
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.black.opacity(0.06))
+                    )
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                    .padding(5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+        }
+    }
+}
 
 private struct ShelfActionButton: View {
     let systemName: String
@@ -653,7 +822,7 @@ private struct DraggableRowContainer<Content: View>: NSViewRepresentable {
          onExternalMove: ((ShelfItem) -> Void)? = nil,
          @ViewBuilder content: () -> Content) {
         self.item = item
-               self.onExternalMove = onExternalMove
+        self.onExternalMove = onExternalMove
         self.content = content()
     }
 
@@ -676,7 +845,7 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
 
     init(item: ShelfItem, rootView: Content, onExternalMove: ((ShelfItem) -> Void)?) {
         self.item = item
-        self.onExternalMove = onExternalMove
+               self.onExternalMove = onExternalMove
         self.hostingView = NSHostingView(rootView: rootView)
         super.init(frame: .zero)
         setupHostingView()
@@ -705,12 +874,11 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
 
     override func mouseDown(with event: NSEvent) {
         mouseDownEvent = event
-        didStartDragThisMouseDown = false        // allow one drag for this press
+        didStartDragThisMouseDown = false
         super.mouseDown(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        // Only allow one start per mouse-down; do nothing after Esc-cancel until mouseUp
         if !isDraggingSessionActive && !didStartDragThisMouseDown {
             let dragEvent = mouseDownEvent ?? event
             didStartDragThisMouseDown = true
@@ -721,7 +889,6 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
     }
 
     override func mouseUp(with event: NSEvent) {
-        // Reset so the next press can start a new drag
         didStartDragThisMouseDown = false
         mouseDownEvent = nil
         super.mouseUp(with: event)
@@ -734,7 +901,7 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
 
         isDraggingSessionActive = true
         let session = beginDraggingSession(with: [draggingItem], event: event, source: self)
-        session.animatesToStartingPositionsOnCancelOrFail = true // explicit, matches your expectation
+        session.animatesToStartingPositionsOnCancelOrFail = true
     }
 
     private func snapshotImage() -> NSImage? {
@@ -772,11 +939,9 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         isDraggingSessionActive = false
         item.endDragAccess()
 
-        let droppedInsideApp = isInsideAnyAppWindow(screenPoint)
+        let droppedInsideAnyAppWindow = isInsideAnyAppWindow(screenPoint)
 
-        // Remove only if the drop completed outside the app.
-        // (operation.isEmpty means cancel/fail; keep item in shelf.)
-        if !droppedInsideApp && !operation.isEmpty {
+        if !droppedInsideAnyAppWindow && !operation.isEmpty {
             onExternalMove?(item)
         }
     }
@@ -787,4 +952,3 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         .environmentObject(Shelf())
         .environmentObject(AuthManager.shared)
 }
-

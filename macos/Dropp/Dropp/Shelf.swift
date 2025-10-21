@@ -27,7 +27,10 @@ final class Shelf: ObservableObject {
             let standardized = url.standardizedFileURL
             // Check if we already have this file by comparing resolved URLs
             let alreadyExists = items.contains { item in
-                item.resolvedURL().standardizedFileURL == standardized
+                // Compare by filename for robustness; local duplicates avoided by exact URL
+                let existingName = item.displayName
+                return existingName == standardized.lastPathComponent
+                    || item.resolvedURL().standardizedFileURL == standardized
             }
             if !alreadyExists {
                 items.append(ShelfItem(url: standardized))
@@ -36,10 +39,20 @@ final class Shelf: ObservableObject {
         logContents()
     }
 
+    func addPhantomCloudItem(filename: String, size: Int64, contentType: String, id: String?, downloadURL: URL?) {
+        // Avoid duplicates by filename
+        if items.contains(where: { $0.displayName == filename }) { return }
+        let info = ShelfItem.CloudFileInfo(filename: filename, size: size, contentType: contentType, id: id, downloadURL: downloadURL)
+        let phantom = ShelfItem(cloudOnly: info)
+        items.append(phantom)
+        logContents()
+    }
+
     func remove(_ item: ShelfItem) {
         guard let index = items.firstIndex(of: item) else { return }
         items.remove(at: index)
         NSLog("Removed item from shelf. Remaining count: \(items.count)")
+        logContents()
         if items.isEmpty {
             NotificationCenter.default.post(name: .shelfBecameEmpty, object: self)
         }
@@ -48,12 +61,21 @@ final class Shelf: ObservableObject {
     func clear() {
         items.removeAll()
         NSLog("Shelf cleared.")
+        logContents()
         NotificationCenter.default.post(name: .shelfBecameEmpty, object: self)
     }
 
     private func logContents() {
-        let paths = items.map { $0.resolvedURL().path }
-        NSLog("Shelf now has \(items.count) item(s): \(paths)")
+        let entries = items.map { item -> String in
+            let state: String
+            switch item.cloudState {
+            case .localOnly: state = "localOnly"
+            case .cloudOnly: state = "cloudOnly"
+            case .both:      state = "both"
+            }
+            return "\(item.displayName) [\(state)]"
+        }
+        NSLog("Shelf now has \(items.count) item(s): \(entries)")
     }
 }
 
@@ -63,6 +85,9 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
     private var bookmarkData: Data
     private var bookmarkUsesSecurityScope = false
     private var isAccessingResource = false
+
+    // Whether this item was created from cloud inventory only (no local file yet)
+    @Published private(set) var isPhantom: Bool = false
 
     // MARK: - Cloud/UI State
 
@@ -76,6 +101,8 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
         var filename: String
         var size: Int64
         var contentType: String
+        var id: String?
+        var downloadURL: URL?
     }
 
     // Cloud presence/state for this item; UI reads this to decide the icon
@@ -95,6 +122,19 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
 
     var isCloudBusy: Bool { cloudActivity != .idle }
 
+    // A user-facing name regardless of whether the item has a local file
+    var displayName: String {
+        cloudInfo?.filename ?? resolvedURL().lastPathComponent
+    }
+
+    // A stable key for persisting link mappings
+    var bookmarkKey: String {
+        bookmarkData.base64EncodedString()
+    }
+
+    // MARK: - Initializers
+
+    // Local file initializer
     init(url: URL) {
         do {
             bookmarkData = try url.bookmarkData(
@@ -120,6 +160,7 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
         }
 
         self.isAccessingResource = false
+        self.isPhantom = false
 
         if !bookmarkData.isEmpty {
             NSLog("✅ Added: \(url.lastPathComponent)")
@@ -131,8 +172,57 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
         self.cloudInfo = ShelfItem.CloudFileInfo(
             filename: url.lastPathComponent,
             size: (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0,
-            contentType: "application/octet-stream"
+            contentType: "application/octet-stream",
+            id: nil,
+            downloadURL: nil
         )
+        self.cloudState = .localOnly
+    }
+
+    // Cloud-only phantom initializer
+    init(cloudOnly info: CloudFileInfo) {
+        self.bookmarkData = Data()
+        self.bookmarkUsesSecurityScope = false
+        self.isAccessingResource = false
+        self.isPhantom = true
+        self.cloudInfo = info
+        self.cloudState = .cloudOnly
+    }
+
+    // After downloading, adopt a local file and transition out of phantom mode
+    func adoptLocalFile(at url: URL) {
+        do {
+            bookmarkData = try url.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            bookmarkUsesSecurityScope = true
+            isPhantom = false
+
+            // Update size/contentType if we can
+            let vals = try? url.resourceValues(forKeys: [.fileSizeKey, .typeIdentifierKey])
+            if var info = cloudInfo {
+                if let s = vals?.fileSize { info.size = Int64(s) }
+                cloudInfo = info
+                // If we have a cloud id, persist the link now that we have a bookmark
+                if let cid = info.id {
+                    CloudLinkStore.shared.link(cloudId: cid, toBookmarkKey: bookmarkKey)
+                }
+            } else {
+                cloudInfo = ShelfItem.CloudFileInfo(
+                    filename: url.lastPathComponent,
+                    size: (vals?.fileSize).map { Int64($0) } ?? 0,
+                    contentType: "application/octet-stream",
+                    id: nil,
+                    downloadURL: nil
+                )
+            }
+
+            cloudState = .both
+        } catch {
+            NSLog("❌ Failed to adopt local file for \(url.lastPathComponent): \(error.localizedDescription)")
+        }
     }
 
     private func recreateBookmark(from url: URL) {
@@ -276,4 +366,3 @@ final class DiskAccessController {
         #endif
     }
 }
-
