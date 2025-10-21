@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
 
     // Create or update user with storage cap
     const DEFAULT_STORAGE_CAP = 100000000; // 100MB in bytes
-    const userCollection = db.collection('users');
+    const userCollection = db.collection<any>('users');
 
     await userCollection.updateOne(
       { _id: decoded.uid },
