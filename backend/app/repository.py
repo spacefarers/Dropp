@@ -166,6 +166,12 @@ def decrement_storage_usage(
     Decrement the user's storage usage by the specified number of bytes.
     Ensures storage_used doesn't go below 0.
     """
+    # First ensure storage_used is not null by setting it to at least 0
+    db.users.update_one(
+        {"user_id": user_id},
+        {"$max": {"storage_used": 0}}
+    )
+    
     result = db.users.find_one_and_update(
         {"user_id": user_id},
         {
@@ -179,12 +185,7 @@ def decrement_storage_usage(
     if result and result.get("storage_used", 0) < 0:
         result = db.users.find_one_and_update(
             {"user_id": user_id},
-            {
-                "$set": {
-                    "storage_used": 0,
-                    "updated_at": _utcnow()
-                }
-            },
+            {"$set": {"storage_used": 0, "updated_at": _utcnow()}},
             return_document=ReturnDocument.AFTER,
         )
 
