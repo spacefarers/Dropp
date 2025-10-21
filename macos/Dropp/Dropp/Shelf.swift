@@ -84,6 +84,17 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
     // Optional metadata about the file for cloud interactions
     @Published var cloudInfo: CloudFileInfo?
 
+    // Activity state to drive spinners/disable actions
+    enum CloudActivity: Equatable {
+        case idle
+        case uploading
+        case downloading
+        case removing
+    }
+    @Published var cloudActivity: CloudActivity = .idle
+
+    var isCloudBusy: Bool { cloudActivity != .idle }
+
     init(url: URL) {
         do {
             bookmarkData = try url.bookmarkData(

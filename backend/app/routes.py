@@ -141,16 +141,40 @@ def request_upload() -> Response:
     filename = file.filename
     content_type = file.content_type
 
+    # Validate filename
+    if not filename or filename.strip() == "":
+        abort(HTTPStatus.BAD_REQUEST, description="Invalid filename")
+
     # Read file into memory to check size before uploading
-    file_data = file.read()
-    file_size = len(file_data)
+    try:
+        file_data = file.read()
+        file_size = len(file_data)
+    except Exception as e:
+        current_app.logger.error(f"Failed to read file data: {e}")
+        abort(HTTPStatus.BAD_REQUEST, description="Failed to read file data")
+
+    # Validate file size
+    if file_size == 0:
+        abort(HTTPStatus.BAD_REQUEST, description="File is empty")
+
+    # Check for reasonable file size limit (e.g., 500MB)
+    MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+    if file_size > MAX_FILE_SIZE:
+        abort(
+            HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            description=f"File too large. Maximum size is {MAX_FILE_SIZE} bytes"
+        )
 
     # Check storage limit before starting upload
-    has_space, user_storage = check_storage_available(
-        current_app.mongo_db,
-        user_id=user_id,
-        additional_bytes=file_size
-    )
+    try:
+        has_space, user_storage = check_storage_available(
+            current_app.mongo_db,
+            user_id=user_id,
+            additional_bytes=file_size
+        )
+    except Exception as e:
+        current_app.logger.error(f"Failed to check storage availability for user {user_id}: {e}")
+        abort(HTTPStatus.INTERNAL_SERVER_ERROR, description="Failed to verify storage availability")
 
     if not has_space:
         storage_used = user_storage.get("storage_used", 0)
@@ -167,33 +191,61 @@ def request_upload() -> Response:
 
     # Generate blob pathname and upload
     blob_pathname = build_blob_pathname(user_id, filename)
+    blob_url = None
 
-    blob_response = upload_to_blob(
-        pathname=blob_pathname,
-        file_data=file_data,
-        content_type=content_type,
-    )
+    try:
+        blob_response = upload_to_blob(
+            pathname=blob_pathname,
+            file_data=file_data,
+            content_type=content_type,
+        )
+        print(blob_response)
 
-    # Get the actual size from uploaded blob
-    size = blob_response.get("size")
+        blob_url = blob_response.get("downloadUrl")
+
+        if not blob_url:
+            raise ValueError("No URL returned from blob storage")
+
+    except Exception as e:
+        current_app.logger.error(f"Failed to upload file to blob storage for user {user_id}: {e}")
+        abort(HTTPStatus.INTERNAL_SERVER_ERROR, description="Failed to upload file to storage")
 
     # Record completed upload
-    file_doc = record_completed_upload(
-        current_app.mongo_db,
-        user_id=user_id,
-        filename=filename,
-        blob_pathname=blob_pathname,
-        blob_url=blob_response.get("url"),
-        size=size,
-        content_type=content_type,
-    )
+    try:
+        file_doc = record_completed_upload(
+            current_app.mongo_db,
+            user_id=user_id,
+            filename=filename,
+            blob_pathname=blob_pathname,
+            blob_url=blob_url,
+            size=file_size,
+            content_type=content_type,
+        )
+    except Exception as e:
+        current_app.logger.error(f"Failed to record upload in database for user {user_id}: {e}")
+        # Attempt to clean up the blob since DB record failed
+        if blob_url:
+            try:
+                delete_from_blob(blob_url)
+                current_app.logger.info(f"Cleaned up blob {blob_url} after DB failure")
+            except Exception as cleanup_error:
+                current_app.logger.error(f"Failed to clean up blob {blob_url}: {cleanup_error}")
+        abort(HTTPStatus.INTERNAL_SERVER_ERROR, description="Failed to record upload")
 
     # Increment storage usage after successful upload
-    increment_storage_usage(
-        current_app.mongo_db,
-        user_id=user_id,
-        bytes_added=size
-    )
+    try:
+        increment_storage_usage(
+            current_app.mongo_db,
+            user_id=user_id,
+            bytes_added=file_size
+        )
+    except Exception as e:
+        current_app.logger.error(
+            f"Failed to increment storage usage for user {user_id} by {size} bytes: {e}. "
+            f"File uploaded successfully but storage counter may be inaccurate."
+        )
+        # Don't fail the request since the file was uploaded successfully
+        # The storage counter can be corrected later
 
     return jsonify({"file": file_doc}), HTTPStatus.CREATED
 

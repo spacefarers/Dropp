@@ -371,15 +371,32 @@ private struct ShelfItemRow: View {
             VStack(spacing: 6) {
                 // Cloud action (only shown when logged in)
                 if auth.isLoggedIn {
-                    ShelfActionButton(
-                        systemName: cloudIconName(for: item.cloudState),
-                        tooltip: cloudTooltip(for: item.cloudState),
-                        backgroundColor: iconBackgroundColor,
-                        foregroundColor: Palette.accent,
-                        size: 22,
-                        cornerRadius: 6
-                    ) {
-                        handleCloudAction(for: item)
+                    if item.isCloudBusy {
+                        // Spinner styled like the action button to keep layout/feel identical
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(iconBackgroundColor)
+                                .shadow(color: Palette.shadow.opacity(0.18), radius: 22 * 0.28, y: 22 * 0.18)
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .controlSize(.small)
+                                .scaleEffect(0.9) // visually centered for 22x22
+                                .tint(Palette.accent)
+                        }
+                        .frame(width: 22, height: 22)
+                        .help("Working…")
+                    } else {
+                        ShelfActionButton(
+                            systemName: cloudIconName(for: item.cloudState),
+                            tooltip: cloudTooltip(for: item.cloudState),
+                            backgroundColor: iconBackgroundColor,
+                            foregroundColor: Palette.accent,
+                            size: 22,
+                            cornerRadius: 6
+                        ) {
+                            handleCloudAction(for: item)
+                        }
+                        .disabled(item.isCloudBusy)
                     }
                 }
 
@@ -394,6 +411,7 @@ private struct ShelfItemRow: View {
                 ) {
                     onRemove(item)
                 }
+                .disabled(item.isCloudBusy)
 
                 ShelfActionButton(
                     systemName: "magnifyingglass",
@@ -405,6 +423,7 @@ private struct ShelfItemRow: View {
                 ) {
                     onReveal(item)
                 }
+                .disabled(item.isCloudBusy)
             }
             .frame(width: 24)
             .opacity(isHovering ? 1 : 0)
@@ -437,7 +456,9 @@ private struct ShelfItemRow: View {
         switch item.cloudState {
         case .localOnly:
             // Preflight quota check then upload
+            item.cloudActivity = .uploading
             Task { @MainActor in
+                defer { item.cloudActivity = .idle }
                 do {
                     let fileSize = try determineLocalFileSize(item: item)
                     let used = shelf.cloudStorageUsed
@@ -766,3 +787,4 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         .environmentObject(Shelf())
         .environmentObject(AuthManager.shared)
 }
+
