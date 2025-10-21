@@ -121,7 +121,7 @@ final class DroppAPIClient {
     func list() async throws -> (files: [ShelfItem.CloudFileInfo], storageUsed: Int64, storageCap: Int64) {
         try requireAuth()
 
-        let url = DroppAPI.baseURL.appendingPathComponent("list", isDirectory: true)
+        let url = DroppAPI.baseURL.appendingPathComponent("list")
         NSLog(url.absoluteString)
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -155,7 +155,7 @@ final class DroppAPIClient {
     ) async throws -> String {
         try requireAuth()
 
-        let url = DroppAPI.baseURL.appendingPathComponent("upload/token", isDirectory: true)
+        let url = DroppAPI.baseURL.appendingPathComponent("upload/token")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         auth.authorize(&request)
@@ -289,40 +289,64 @@ final class DroppAPIClient {
         let urlString = request.url?.absoluteString ?? "<nil>"
         let status = http.statusCode
 
+        // Log request summary
+        NSLog("↩️ [\(purpose)] \(method) \(urlString)")
+        NSLog("   Status: \(status) • \(durationMs) ms")
+
+        // Log headers
         let headerLines: [String] = http.allHeaderFields.compactMap { key, value in
             "\(String(describing: key)): \(String(describing: value))"
         }.sorted()
 
+        if !headerLines.isEmpty {
+            NSLog("   Response Headers:")
+            for header in headerLines {
+                NSLog("      \(header)")
+            }
+        }
+
+        // Log body separately to avoid NSLog character limits
         let contentType = (http.allHeaderFields["Content-Type"] as? String) ?? (http.allHeaderFields["content-type"] as? String) ?? ""
         let isLikelyText = contentType.contains("json")
             || contentType.contains("text/")
             || contentType.contains("xml")
             || contentType.contains("yaml")
 
-        let maxPreviewBytes = 8 * 1024
+        let maxPreviewBytes = 100000000
+        let logChunkSize = 500000  // Split large responses into 500KB chunks
 
-        var bodyPreview: String = ""
         if let data, !data.isEmpty {
             if isLikelyText, let text = String(data: data.prefix(maxPreviewBytes), encoding: .utf8) {
-                let truncated = data.count > maxPreviewBytes ? " …(truncated)" : ""
-                bodyPreview = "Body (\(data.count) bytes, text):\n\(text)\(truncated)"
+                let truncated = data.count > maxPreviewBytes ? " (truncated beyond \(maxPreviewBytes / 1000000)MB)" : ""
+                NSLog("   Body (\(data.count) bytes, text)\(truncated):")
+
+                // Split into chunks to avoid NSLog truncation
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                var currentChunk = ""
+                for line in lines {
+                    if currentChunk.count + line.count > logChunkSize {
+                        NSLog("      \(currentChunk)")
+                        currentChunk = line
+                    } else {
+                        if !currentChunk.isEmpty {
+                            currentChunk += "\n"
+                        }
+                        currentChunk += line
+                    }
+                }
+                if !currentChunk.isEmpty {
+                    NSLog("      \(currentChunk)")
+                }
             } else {
                 let prefix = data.prefix(min(64, data.count))
                 let hex = prefix.map { String(format: "%02x", $0) }.joined(separator: " ")
-                let truncated = data.count > prefix.count ? " …(truncated)" : ""
-                bodyPreview = "Body (\(data.count) bytes, binary):\n\(hex)\(truncated)"
+                let truncated = data.count > prefix.count ? " (truncated)" : ""
+                NSLog("   Body (\(data.count) bytes, binary)\(truncated):")
+                NSLog("      \(hex)")
             }
         } else {
-            bodyPreview = "Body: <empty>"
+            NSLog("   Body: <empty>")
         }
-
-        NSLog("""
-        ↩️ [\(purpose)] \(method) \(urlString)
-           Status: \(status) • \(durationMs) ms
-           Response Headers:
-           \(headerLines.joined(separator: "\n   "))
-           \(bodyPreview)
-        """)
     }
 
     #if DEBUG

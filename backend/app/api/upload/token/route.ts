@@ -1,6 +1,8 @@
 import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyDroppToken } from '@/lib/jwt';
+import { getDb } from '@/lib/mongodb';
+import { UserDoc } from '@/types/UserDoc';
 
 function authOrThrow(req: NextRequest) {
   const authz = req.headers.get('authorization') || '';
@@ -26,6 +28,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (!filename) {
       return NextResponse.json({ error: 'Filename is required' }, { status: 400 });
+    }
+
+    // Check storage quota
+    const db = await getDb();
+    const user = await db.collection<UserDoc>('users').findOne({ _id: claims.sub });
+
+    if (!user) {
+      console.error(`User not found: ${claims.sub}`);
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    if (maximumSizeInBytes && user.used + maximumSizeInBytes > user.cap) {
+      const remainingStorage = user.cap - user.used;
+      console.warn(`Storage quota exceeded for user ${claims.sub}: used=${user.used}, cap=${user.cap}, requested=${maximumSizeInBytes}`);
+      return NextResponse.json(
+        {
+          error: 'Storage quota exceeded',
+          remaining: remainingStorage,
+          used: user.used,
+          cap: user.cap,
+        },
+        { status: 413 }
+      );
     }
 
     const token = process.env.BLOB_READ_WRITE_TOKEN;

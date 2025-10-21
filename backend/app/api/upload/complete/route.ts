@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
+import { head } from '@vercel/blob';
+import { UserDoc } from '@/types/UserDoc';
 
 interface UploadCompletePayload {
   blob: {
@@ -23,7 +25,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Parse metadata from token payload
     const tokenPayload = payload.tokenPayload
-      ? (JSON.parse(payload.tokenPayload) as { userId?: string; origName?: string; userEmail?: string })
+      ? (JSON.parse(payload.tokenPayload) as { userId?: string; origName?: string; userEmail?: string; contentType?: string })
       : null;
 
     if (!tokenPayload?.userId) {
@@ -31,19 +33,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Missing userId in token' }, { status: 400 });
     }
 
-    // Insert file metadata into MongoDB
+    // Get file size from blob metadata
+    const blobMetadata = await head(payload.blob.url);
+    const fileSize = blobMetadata.size;
+
+    // Insert file metadata into MongoDB and update user storage
     const db = await getDb();
+
     const result = await db.collection('files').insertOne({
       user_id: tokenPayload.userId,
       name: tokenPayload.origName || payload.blob.pathname,
       url: payload.blob.url,
       download_url: payload.blob.downloadUrl,
-      content_type: payload.blob.contentType,
+      size: fileSize,
+      content_type: tokenPayload.contentType || payload.blob.contentType,
       created_at: new Date().toISOString(),
       status: 'complete',
     });
 
-    console.log(`File uploaded successfully: ${payload.blob.pathname} (id: ${result.insertedId})`);
+    // Update user's storage usage
+    await db.collection<UserDoc>('users').updateOne(
+      { _id: tokenPayload.userId },
+      { $inc: { used: fileSize } }
+    );
+
+    console.log(`File uploaded successfully: ${payload.blob.pathname} (id: ${result.insertedId}, size: ${fileSize})`);
 
     return NextResponse.json({ success: true, fileId: result.insertedId });
   } catch (error: any) {

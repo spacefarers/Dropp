@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongodb';
 import { verifyDroppToken } from '@/lib/jwt';
+import { UserDoc } from '@/types/UserDoc';
 
 export async function GET(req: NextRequest) {
   const authz = req.headers.get('authorization') || '';
@@ -10,12 +11,25 @@ export async function GET(req: NextRequest) {
   try {
     const claims = verifyDroppToken(token);
     const db = await getDb();
+
+    // Get user's storage information
+    const user = await db.collection<UserDoc>('users').findOne({ _id: claims.sub });
+
+    // Get user's files
     const files = await db.collection('files')
       .find({ user_id: claims.sub })
       .sort({ created_at: -1 })
       .toArray();
 
-    return NextResponse.json(files);
+    const storage = {
+      used: user?.used ?? 0,
+      cap: user?.cap ?? 100000000, // Default to 100MB if user doc not found
+    };
+
+    return NextResponse.json({
+      files,
+      storage,
+    });
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

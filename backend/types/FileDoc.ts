@@ -3,7 +3,7 @@ export type FileDoc = {
   user_id: string;
   name: string;
   url: string;
-  size?: number;
+  size: number;
   content_type?: string;
   created_at: string;
   status?: 'pending' | 'complete';

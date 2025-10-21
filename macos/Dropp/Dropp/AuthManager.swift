@@ -175,6 +175,7 @@ final class AuthManager: ObservableObject {
     func authorize(_ request: inout URLRequest) {
         if let sessionToken {
             request.addValue("Bearer \(sessionToken)", forHTTPHeaderField: "Authorization")
+            NSLog(sessionToken)
         }
     }
 
