@@ -290,8 +290,12 @@ struct ContentView: View {
             shelf.cloudStorageUsed = result.storageUsed
             shelf.cloudStorageCap = result.storageCap
 
-            // Do not attempt to correlate existing local items with cloud inventory.
-            // Just add phantom items for every cloud file.
+            // First, sync cloud presence to remove stale cloud-only items and demote "both" items
+            // that no longer exist in the cloud
+            let currentCloudFilenames = Set(result.files.map { $0.filename })
+            shelf.syncCloudPresence(with: currentCloudFilenames)
+
+            // Then, add or update phantom items for cloud files
             for info in result.files {
                 shelf.addPhantomCloudItem(
                     filename: info.filename,

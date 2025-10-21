@@ -10,7 +10,7 @@ final class AuthManager: ObservableObject {
     private let callbackScheme = "dropp"
     private let callbackHost = "auth"
     private let callbackPath: String? = "/callback"
-    private let loginBaseURL = URL(string: "https://dropp.yangm.tech/login")!
+    private let loginBaseURL = Backend.loginURL
 
     @Published private(set) var isLoggedIn: Bool = false
     @Published private(set) var displayName: String?
@@ -208,4 +208,3 @@ final class AuthManager: ObservableObject {
         return "\(callbackScheme)://\(callbackHost)\(path)"
     }
 }
-

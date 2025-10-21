@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { signInWithGooglePopup } from '@/lib/firebaseClient';
 
-const DEFAULT_APP_REDIRECT_URI = process.env.NEXT_PUBLIC_APP_REDIRECT_URI || 'dropp://auth/callback';
 const RETURNING_STATUS = 'Returning to Dropp…';
 
 export default function Login() {
@@ -13,6 +12,16 @@ export default function Login() {
   const [finalized, setFinalized] = useState(false);
   const [showSuccessBanner, setShowSuccessBanner] = useState(false);
   const hasAttemptedFinalization = useRef(false);
+  const [redirectUri, setRedirectUri] = useState<string>('/');
+
+  // Get redirect_uri from query params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const uri = params.get('redirect_uri');
+    if (uri) {
+      setRedirectUri(uri);
+    }
+  }, []);
 
   const finalizeSession = useCallback(async (idToken: string) => {
     if (finalized) return;
@@ -35,9 +44,8 @@ export default function Login() {
       setStatus(RETURNING_STATUS);
       setShowSuccessBanner(true);
 
-      // Deep-link back to desktop client, mirroring existing logic.
-      const redirectStr = DEFAULT_APP_REDIRECT_URI;
-      const redirectUrl = new URL(redirectStr);
+      // Deep-link back to desktop client or home page
+      const redirectUrl = new URL(redirectUri, window.location.origin);
       const fallbackParams = {
         session_token: jwtToken,
         user_id: payload.user_id,
@@ -59,7 +67,7 @@ export default function Login() {
       setStatusError(true);
       setShowSuccessBanner(false);
     }
-  }, [finalized]);
+  }, [finalized, redirectUri]);
 
   const handleGoogleLogin = async () => {
     setStatus('Opening Google sign-in…');

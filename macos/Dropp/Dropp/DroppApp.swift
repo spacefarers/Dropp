@@ -229,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileDragObserver.onFileDragEnd = { [weak self] _ in
             Task { @MainActor in
                 guard let self = self else { return }
-                try? await Task.sleep(nanoseconds: 120_000_000)
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 self.visibilityController.setVisible(false)
             }
         }

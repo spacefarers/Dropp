@@ -65,6 +65,40 @@ final class Shelf: ObservableObject {
         NotificationCenter.default.post(name: .shelfBecameEmpty, object: self)
     }
 
+    func syncCloudPresence(with cloudFilenames: Set<String>) {
+        var removedCloudOnly: [String] = []
+        var demotedToLocal: [String] = []
+
+        items.removeAll { item in
+            let filename = item.displayName
+            let existsInCloud = cloudFilenames.contains(filename)
+
+            if item.cloudState == .cloudOnly && !existsInCloud {
+                // Remove cloud-only items that no longer exist in the cloud
+                removedCloudOnly.append(filename)
+                return true
+            } else if item.cloudState == .both && !existsInCloud {
+                // For items that are both local and cloud, demote to local-only
+                item.cloudState = .localOnly
+                item.cloudInfo = nil
+                demotedToLocal.append(filename)
+            }
+
+            return false
+        }
+
+        if !removedCloudOnly.isEmpty {
+            NSLog("Removed \(removedCloudOnly.count) stale cloud-only item(s): \(removedCloudOnly)")
+        }
+        if !demotedToLocal.isEmpty {
+            NSLog("Demoted \(demotedToLocal.count) item(s) to local-only: \(demotedToLocal)")
+        }
+
+        if !removedCloudOnly.isEmpty || !demotedToLocal.isEmpty {
+            logContents()
+        }
+    }
+
     private func logContents() {
         let entries = items.map { item -> String in
             let state: String

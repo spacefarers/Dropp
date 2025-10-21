@@ -34,7 +34,7 @@ enum DroppAPIError: Error, LocalizedError {
 }
 
 struct DroppAPI {
-    static let baseURL = URL(string: "https://dropp.yangm.tech/api")!
+    static let baseURL = Backend.apiBaseURL
 }
 
 @MainActor
@@ -76,17 +76,17 @@ final class DroppAPIClient {
 
         let contentType = item.cloudInfo?.contentType ?? "application/octet-stream"
 
-        // STEP 1: Get upload token from backend
-        let uploadToken = try await getUploadToken(
+        // STEP 1: Get upload token + URL from backend
+        let uploadInfo = try await getUploadToken(
             filename: filename,
             contentType: contentType,
             fileSize: fileData.count
         )
 
-        // STEP 2: Upload directly to Vercel
+        // STEP 2: Upload directly to Vercel using provided URL
         try await uploadToVercel(
-            token: uploadToken,
-            filename: filename,
+            token: uploadInfo.token,
+            uploadURL: uploadInfo.uploadURL,
             contentType: contentType,
             fileData: fileData
         )
@@ -96,6 +96,7 @@ final class DroppAPIClient {
 
     // Remove a cloud file by id.
     func remove(info: ShelfItem.CloudFileInfo) async throws {
+        NSLog("❌ Requesting file deletion: \(info.filename)")
         try requireAuth()
 
         guard let id = info.id, !id.isEmpty else {
@@ -152,7 +153,7 @@ final class DroppAPIClient {
         filename: String,
         contentType: String,
         fileSize: Int
-    ) async throws -> String {
+    ) async throws -> (token: String, uploadURL: URL) {
         try requireAuth()
 
         let url = DroppAPI.baseURL.appendingPathComponent("upload/token")
@@ -175,31 +176,39 @@ final class DroppAPIClient {
         try validateResponse(response, data: data)
 
         let tokenResponse = try JSONDecoder().decode(TokenResponse.self, from: data)
-        return tokenResponse.token
+
+        guard let token = Optional(tokenResponse.token), !token.isEmpty else {
+            throw DroppAPIError.missingData
+        }
+        guard let uploadURL = tokenResponse.uploadUrl else {
+            throw DroppAPIError.missingData
+        }
+
+        return (token, uploadURL)
     }
 
     private func uploadToVercel(
         token: String,
-        filename: String,
+        uploadURL: URL,
         contentType: String,
         fileData: Data
     ) async throws {
-        let url = URL(string: "https://blob.vercelusercontent.com/upload")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.httpBody = fileData
 
-        NSLog("➡️ [upload] POST \(url.absoluteString) • filename=\(filename) • size=\(fileData.count)")
+        NSLog("➡️ [upload] PUT \(uploadURL.absoluteString) • size=\(fileData.count)")
 
         let t0 = Date()
         let (data, response) = try await session.data(for: request)
         logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "upload-to-vercel")
         try validateResponse(response, data: data)
 
-        NSLog("✅ Vercel accepted upload: \(filename)")
+        NSLog("✅ Vercel accepted upload: \(uploadURL.lastPathComponent)")
     }
+
 
     // MARK: - Helpers
 
@@ -364,7 +373,7 @@ final class DroppAPIClient {
 
 private struct TokenResponse: Decodable {
     let token: String
-    let uploadUrl: String?
+    let uploadUrl: URL?
 }
 
 private struct ListResponse: Decodable {
