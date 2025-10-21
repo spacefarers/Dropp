@@ -20,7 +20,7 @@ def build_blob_pathname(user_id: str, original_filename: str) -> str:
 def upload_to_blob(
     *,
     pathname: str,
-    file_data: BinaryIO,
+    file_data: bytes,
     content_type: str | None = None,
 ) -> dict:
     """

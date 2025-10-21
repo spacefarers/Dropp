@@ -168,13 +168,9 @@ def request_upload() -> Response:
     # Generate blob pathname and upload
     blob_pathname = build_blob_pathname(user_id, filename)
 
-    # Create a file-like object from bytes for upload
-    from io import BytesIO
-    file_stream = BytesIO(file_data)
-
     blob_response = upload_to_blob(
         pathname=blob_pathname,
-        file_data=file_stream,
+        file_data=file_data,
         content_type=content_type,
     )
 
