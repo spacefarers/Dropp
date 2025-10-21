@@ -9,6 +9,10 @@ import Foundation
 import Combine
 import AppKit
 
+extension Notification.Name {
+    static let shelfBecameEmpty = Notification.Name("ShelfBecameEmpty")
+}
+
 @MainActor
 final class Shelf: ObservableObject {
     @Published private(set) var items: [ShelfItem] = []
@@ -32,11 +36,15 @@ final class Shelf: ObservableObject {
         guard let index = items.firstIndex(of: item) else { return }
         items.remove(at: index)
         NSLog("Removed item from shelf. Remaining count: \(items.count)")
+        if items.isEmpty {
+            NotificationCenter.default.post(name: .shelfBecameEmpty, object: self)
+        }
     }
 
     func clear() {
         items.removeAll()
         NSLog("Shelf cleared.")
+        NotificationCenter.default.post(name: .shelfBecameEmpty, object: self)
     }
 
     private func logContents() {
@@ -226,3 +234,4 @@ final class DiskAccessController {
         #endif
     }
 }
+

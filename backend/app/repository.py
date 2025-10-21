@@ -143,7 +143,7 @@ def record_or_update_session(
     session_token: str,
     email: Optional[str],
 ) -> Dict[str, Any]:
-    """Persist the mapping between a Clerk session token and a Dropp user."""
+    """Persist the mapping between a Firebase session token and a Dropp user."""
 
     now = _utcnow()
     update = {

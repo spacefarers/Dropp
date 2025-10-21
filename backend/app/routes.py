@@ -12,7 +12,7 @@ from flask import (
     request,
 )
 
-from .auth import ClerkAuthError, ClerkAuthService, ClerkUser
+from .firebase_auth import FirebaseAuthError, FirebaseAuthService, FirebaseUser
 from .repository import (
     get_file_by_id,
     list_files_for_user,
@@ -26,36 +26,32 @@ api_bp = Blueprint("api", __name__)
 
 
 def _resolve_user_id() -> str:
-    token = _extract_clerk_token()
+    token = _extract_firebase_token()
     if not token:
-        abort(HTTPStatus.UNAUTHORIZED, description="Clerk session token is required.")
+        abort(HTTPStatus.UNAUTHORIZED, description="Firebase session token is required.")
 
-    clerk_user = _verify_clerk_session_token(token)
-    return clerk_user.user_id
+    firebase_user = _verify_firebase_token(token)
+    return firebase_user.user_id
 
 
-def _verify_clerk_session_token(token: str) -> ClerkUser:
+def _verify_firebase_token(token: str) -> FirebaseUser:
     try:
-        return _clerk_service().verify_token(token)
-    except ClerkAuthError as exc:
+        return _firebase_service().verify_token(token)
+    except FirebaseAuthError as exc:
         abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
 
 
-def _extract_clerk_token() -> Optional[str]:
+def _extract_firebase_token() -> Optional[str]:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.lower().startswith("bearer "):
         return auth_header.split(" ", 1)[1].strip() or None
 
-    header_token = request.headers.get("Clerk-Session")
-    if header_token:
-        return header_token.strip() or None
-
     return None
 
 
-def _clerk_service() -> ClerkAuthService:
-    secret_key = current_app.config["CLERK_SECRET_KEY"]
-    return ClerkAuthService(secret_key)
+def _firebase_service() -> FirebaseAuthService:
+    service_account_base64 = current_app.config.get("FIREBASE_SERVICE_ACCOUNT_BASE64")
+    return FirebaseAuthService(service_account_base64)
 
 
 @api_bp.get("/")
@@ -67,28 +63,39 @@ def healthcheck() -> Dict[str, Any]:
 # API endpoints below handle backend logic
 
 
-@api_bp.post("/auth/clerk/session")
-def clerk_finalize_session() -> Response:
-    request_token = _extract_clerk_token()
+@api_bp.post("/auth/firebase/session")
+def firebase_finalize_session() -> Response:
+    auth_header = request.headers.get("Authorization", "")
+    request_token = None
+
+    if auth_header.lower().startswith("bearer "):
+        request_token = auth_header.split(" ", 1)[1].strip() or None
+
     if not request_token:
         payload = request.get_json(silent=True) or {}
         request_token = (payload.get("token") or "").strip()
 
     if not request_token:
-        abort(HTTPStatus.BAD_REQUEST, description="Missing Clerk authentication token.")
+        abort(HTTPStatus.BAD_REQUEST, description="Missing Firebase authentication token.")
 
-    clerk_user = _verify_clerk_session_token(request_token)
+    try:
+        firebase_user = _firebase_service().verify_token(request_token)
+    except FirebaseAuthError as exc:
+        abort(HTTPStatus.UNAUTHORIZED, description=str(exc))
+
     session_doc = record_or_update_session(
         current_app.mongo_db,
-        user_id=clerk_user.user_id,
+        user_id=firebase_user.user_id,
         session_token=request_token,
-        email=clerk_user.email,
+        email=firebase_user.email,
     )
+
     return jsonify(
         {
             "session_token": request_token,
-            "user_id": clerk_user.user_id,
-            "email": clerk_user.email,
+            "user_id": firebase_user.user_id,
+            "email": firebase_user.email,
+            "display_name": firebase_user.display_name,
             "session_id": session_doc.get("id"),
         }
     )

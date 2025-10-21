@@ -273,6 +273,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         )
+
+        // Hide immediately when the shelf becomes empty (e.g., after removing the last item).
+        notificationTokens.append(
+            NotificationCenter.default.addObserver(
+                forName: .shelfBecameEmpty,
+                object: shelf,
+                queue: .main
+            ) { [weak self] _ in
+                self?.visibilityController.setVisible(false)
+            }
+        )
     }
 
     private func installGlobalMouseMonitor() {

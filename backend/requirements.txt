@@ -3,4 +3,4 @@ Flask-Cors
 pymongo
 python-dotenv
 vercel-blob
-clerk-backend-api
+firebase-admin
