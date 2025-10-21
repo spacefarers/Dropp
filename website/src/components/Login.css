@@ -49,3 +49,13 @@
 .login-status.error {
   color: #fca5a5;
 }
+
+.login-success-banner {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: rgba(34, 197, 94, 0.18);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  color: #bbf7d0;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}

@@ -6,6 +6,7 @@ const DEFAULT_APP_REDIRECT_URI = 'dropp://auth/callback'
 const backendBaseUrl = 'https://droppapi.yangm.tech'
 const envAppRedirectUri = (import.meta.env.VITE_APP_REDIRECT_URI || '').trim()
 const finalizePath = import.meta.env.VITE_AUTH_FINALIZE_PATH || '/auth/firebase/session'
+const RETURNING_STATUS = 'Returning to Dropp…'
 
 const buildBackendUrl = (path) => {
     if (!path.startsWith('/')) {
@@ -39,6 +40,7 @@ export default function Login() {
     const [finalizing, setFinalizing] = useState(false)
     const [finalized, setFinalized] = useState(false)
     const [redirectUri] = useState(resolveRedirectUri)
+    const [showSuccessBanner, setShowSuccessBanner] = useState(false)
     const hasAttemptedFinalization = useRef(false)
 
     useEffect(() => {
@@ -46,6 +48,7 @@ export default function Login() {
             hasAttemptedFinalization.current = false
             setFinalized(false)
             setFinalizing(false)
+            setShowSuccessBanner(false)
         }
     }, [user])
 
@@ -86,7 +89,8 @@ export default function Login() {
             }
 
             setFinalized(true)
-            setStatus('Returning to Dropp…')
+            setStatus(RETURNING_STATUS)
+            setShowSuccessBanner(true)
 
             const target = redirectUri || DEFAULT_APP_REDIRECT_URI
             let redirectUrl
@@ -130,6 +134,7 @@ export default function Login() {
             setFinalizing(false)
             setStatus("We couldn't finish signing you in. Please try again.")
             setStatusError(true)
+            setShowSuccessBanner(false)
         }
     }, [user, finalized, redirectUri])
 
@@ -141,6 +146,7 @@ export default function Login() {
     const handleGoogleLogin = async () => {
         setStatus(null)
         setStatusError(false)
+        setShowSuccessBanner(false)
 
         try {
             setStatus('Opening Google sign-in…')
@@ -152,24 +158,34 @@ export default function Login() {
             console.error('Google sign-in failed', error)
             setStatus('Google sign-in was cancelled or failed. Please try again.')
             setStatusError(true)
+            setShowSuccessBanner(false)
         }
     }
+
+    const isReturningToDropp = status === RETURNING_STATUS
 
     return (
         <div className="login-container">
             <main className="login-card">
                 <h1>Welcome to Dropp</h1>
                 <p className="login-lead">Authenticate with Firebase to continue to the Dropp desktop app.</p>
-                <div className="login-actions">
-                    <button className="btn btn-primary" type="button" onClick={handleGoogleLogin}
-                            disabled={loading || finalizing}>
-                        Login with Google
-                    </button>
-                </div>
+                {!isReturningToDropp && (
+                    <div className="login-actions">
+                        <button className="btn btn-primary" type="button" onClick={handleGoogleLogin}
+                                disabled={loading || finalizing}>
+                            Login with Google
+                        </button>
+                    </div>
+                )}
                 {status && (
                     <p className={`login-status ${statusError ? 'error' : ''}`} role="status">
                         {status}
                     </p>
+                )}
+                {showSuccessBanner && !statusError && (
+                    <div className="login-success-banner" role="status">
+                        Feel free to close this page.
+                    </div>
                 )}
             </main>
         </div>

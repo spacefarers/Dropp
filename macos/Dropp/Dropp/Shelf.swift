@@ -60,6 +60,26 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
     private var bookmarkUsesSecurityScope = false
     private var isAccessingResource = false
 
+    // MARK: - Cloud/UI State
+
+    enum CloudPresence: Equatable {
+        case localOnly
+        case cloudOnly
+        case both
+    }
+
+    struct CloudFileInfo: Equatable {
+        var filename: String
+        var size: Int64
+        var contentType: String
+    }
+
+    // Cloud presence/state for this item; UI reads this to decide the icon
+    @Published var cloudState: CloudPresence = .localOnly
+
+    // Optional metadata about the file for cloud interactions
+    @Published var cloudInfo: CloudFileInfo?
+
     init(url: URL) {
         do {
             bookmarkData = try url.bookmarkData(
@@ -91,6 +111,15 @@ final class ShelfItem: ObservableObject, Identifiable, Hashable {
         } else {
             NSLog("❌ Failed to add: \(url.lastPathComponent)")
         }
+
+        // Seed initial metadata from local URL if desired (UI-only; safe to leave nil)
+        // This is optional; you can fill it later when implementing upload/download logic.
+        // Example:
+        // self.cloudInfo = CloudFileInfo(
+        //     filename: url.lastPathComponent,
+        //     size: (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0,
+        //     contentType: "application/octet-stream"
+        // )
     }
 
     private func recreateBookmark(from url: URL) {

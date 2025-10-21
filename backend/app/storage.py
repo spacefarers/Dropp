@@ -33,3 +33,10 @@ def upload_to_blob(
 
     response = vercel_blob.put(file_data, options=options)
     return response
+
+
+def delete_from_blob(blob_url: str) -> None:
+    """
+    Delete a file from Vercel Blob storage by its URL.
+    """
+    vercel_blob.delete(blob_url)

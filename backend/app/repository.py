@@ -25,7 +25,6 @@ def serialize_file(doc: Dict[str, Any]) -> Dict[str, Any]:
         "content_type": doc.get("content_type"),
         "blob_pathname": doc.get("blob_pathname"),
         "blob_url": doc.get("blob_url"),
-        "status": doc.get("status", "pending"),
         "created_at": doc["created_at"].isoformat(),
         "updated_at": doc["updated_at"].isoformat(),
         "uploaded_at": doc.get("uploaded_at").isoformat()
@@ -34,17 +33,18 @@ def serialize_file(doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def record_upload_init(
+def record_completed_upload(
     db: Database,
     *,
     user_id: str,
     filename: str,
     blob_pathname: str,
-    size: Optional[int],
+    blob_url: str,
+    size: int,
     content_type: Optional[str],
 ) -> Dict[str, Any]:
     """
-    Store upload metadata before the client pushes the bytes to Vercel Blob.
+    Store a completed file upload with all metadata.
     """
     now = _utcnow()
     document = {
@@ -53,50 +53,14 @@ def record_upload_init(
         "size": size,
         "content_type": content_type,
         "blob_pathname": blob_pathname,
-        "blob_url": None,
-        "status": "pending",
+        "blob_url": blob_url,
         "created_at": now,
         "updated_at": now,
-        "uploaded_at": None,
+        "uploaded_at": now,
     }
     result = db.files.insert_one(document)
     document["_id"] = result.inserted_id
     return serialize_file(document)
-
-
-def mark_upload_completed(
-    db: Database,
-    *,
-    file_id: str,
-    user_id: str,
-    blob_url: str,
-    size: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
-    """
-    Mark an upload as completed, storing the blob URL and final size.
-    """
-    update_fields: Dict[str, Any] = {
-        "status": "complete",
-        "blob_url": blob_url,
-        "uploaded_at": _utcnow(),
-        "updated_at": _utcnow()
-    }
-    if size is not None:
-        update_fields["size"] = size
-
-    try:
-        object_id = ObjectId(file_id)
-    except (InvalidId, TypeError):
-        return None
-
-    result = db.files.find_one_and_update(
-        {"_id": object_id, "user_id": user_id},
-        {"$set": update_fields},
-        return_document=ReturnDocument.AFTER,
-    )
-    if not result:
-        return None
-    return serialize_file(result)
 
 
 def list_files_for_user(db: Database, *, user_id: str) -> List[Dict[str, Any]]:
@@ -119,6 +83,112 @@ def get_file_by_id(db: Database, *, file_id: str, user_id: str) -> Optional[Dict
     if not doc:
         return None
     return serialize_file(doc)
+
+
+def delete_file_by_id(db: Database, *, file_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Delete a file document from the database, ensuring it belongs to the requesting user.
+    Returns the deleted document if successful.
+    """
+    try:
+        object_id = ObjectId(file_id)
+    except (InvalidId, TypeError):
+        return None
+    doc = db.files.find_one_and_delete({"_id": object_id, "user_id": user_id})
+    if not doc:
+        return None
+    return serialize_file(doc)
+
+
+def get_or_create_user_storage(db: Database, *, user_id: str) -> Dict[str, Any]:
+    """
+    Get or create a user storage document.
+    Default storage cap is 100MB (100 * 1024 * 1024 bytes).
+    """
+    DEFAULT_STORAGE_CAP = 100 * 1024 * 1024  # 100MB in bytes
+
+    now = _utcnow()
+    result = db.users.find_one_and_update(
+        {"user_id": user_id},
+        {
+            "$setOnInsert": {
+                "user_id": user_id,
+                "storage_used": 0,
+                "storage_cap": DEFAULT_STORAGE_CAP,
+                "created_at": now,
+            },
+            "$set": {
+                "updated_at": now,
+            },
+        },
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return result
+
+
+def check_storage_available(
+    db: Database, *, user_id: str, additional_bytes: int
+) -> tuple[bool, Dict[str, Any]]:
+    """
+    Check if user has enough storage available for the additional bytes.
+    Returns (has_space, user_storage_doc).
+    """
+    user_storage = get_or_create_user_storage(db, user_id=user_id)
+    storage_used = user_storage.get("storage_used", 0)
+    storage_cap = user_storage.get("storage_cap", 100 * 1024 * 1024)
+
+    has_space = (storage_used + additional_bytes) <= storage_cap
+    return has_space, user_storage
+
+
+def increment_storage_usage(
+    db: Database, *, user_id: str, bytes_added: int
+) -> Optional[Dict[str, Any]]:
+    """
+    Increment the user's storage usage by the specified number of bytes.
+    """
+    result = db.users.find_one_and_update(
+        {"user_id": user_id},
+        {
+            "$inc": {"storage_used": bytes_added},
+            "$set": {"updated_at": _utcnow()},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    return result
+
+
+def decrement_storage_usage(
+    db: Database, *, user_id: str, bytes_removed: int
+) -> Optional[Dict[str, Any]]:
+    """
+    Decrement the user's storage usage by the specified number of bytes.
+    Ensures storage_used doesn't go below 0.
+    """
+    result = db.users.find_one_and_update(
+        {"user_id": user_id},
+        {
+            "$inc": {"storage_used": -bytes_removed},
+            "$set": {"updated_at": _utcnow()},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+    # Ensure storage_used doesn't go negative
+    if result and result.get("storage_used", 0) < 0:
+        result = db.users.find_one_and_update(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "storage_used": 0,
+                    "updated_at": _utcnow()
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+
+    return result
 
 
 def serialize_session(doc: Dict[str, Any]) -> Dict[str, Any]:

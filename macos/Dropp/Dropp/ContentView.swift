@@ -245,6 +245,7 @@ private struct ShelfItemRow: View {
     let surfaceColor: Color
     let shadowColor: Color
 
+    @EnvironmentObject private var auth: AuthManager
     @State private var isHovering = false
 
     var body: some View {
@@ -277,7 +278,22 @@ private struct ShelfItemRow: View {
             .frame(width: 90, alignment: .leading)
 
             VStack(spacing: 6) {
-                // Flip order: Remove on top, Reveal below
+                // Cloud action (only shown when logged in)
+                if auth.isLoggedIn {
+                    ShelfActionButton(
+                        systemName: cloudIconName(for: item.cloudState),
+                        tooltip: cloudTooltip(for: item.cloudState),
+                        backgroundColor: iconBackgroundColor,
+                        foregroundColor: Palette.accent,
+                        size: 22,
+                        cornerRadius: 6
+                    ) {
+                        // Placeholder: Wire up upload/download/remove later
+                        NSLog("Cloud action tapped for item \(item.resolvedURL().lastPathComponent) with state \(String(describing: item.cloudState))")
+                    }
+                }
+
+                // Remove on top, Reveal below (existing)
                 ShelfActionButton(
                     systemName: "xmark",
                     tooltip: "Remove",
@@ -324,6 +340,28 @@ private struct ShelfItemRow: View {
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering
             }
+        }
+    }
+
+    private func cloudIconName(for state: ShelfItem.CloudPresence) -> String {
+        switch state {
+        case .localOnly:
+            return "icloud.and.arrow.up"
+        case .cloudOnly:
+            return "icloud.and.arrow.down"
+        case .both:
+            return "icloud"
+        }
+    }
+
+    private func cloudTooltip(for state: ShelfItem.CloudPresence) -> String {
+        switch state {
+        case .localOnly:
+            return "Upload to Cloud"
+        case .cloudOnly:
+            return "Download from Cloud"
+        case .both:
+            return "Remove from Cloud"
         }
     }
 
@@ -558,3 +596,4 @@ private final class DraggableContainerView<Content: View>: NSView, NSDraggingSou
         .environmentObject(Shelf())
         .environmentObject(AuthManager.shared)
 }
+

@@ -73,22 +73,35 @@ final class AuthManager: ObservableObject {
         }
 
         let q = components.queryItems ?? []
-        let token = q.first(where: { $0.name == "session_token" })?.value
+        let tokenRaw = q.first(where: { $0.name == "session_token" })?.value
                     ?? q.first(where: { $0.name == "sessionToken" })?.value
                     ?? q.first(where: { $0.name == "token" })?.value
                     ?? q.first(where: { $0.name == "__session" })?.value
-        let userId = q.first(where: { $0.name == "user_id" })?.value
+        let userIdRaw = q.first(where: { $0.name == "user_id" })?.value
                     ?? q.first(where: { $0.name == "userId" })?.value
                     ?? q.first(where: { $0.name == "uid" })?.value
-        let email = q.first(where: { $0.name == "email" })?.value
+        let emailRaw = q.first(where: { $0.name == "email" })?.value
                     ?? q.first(where: { $0.name == "email_address" })?.value
                     ?? q.first(where: { $0.name == "emailAddress" })?.value
-        let sessionIdentifier = q.first(where: { $0.name == "session_id" })?.value
+        let sessionIdentifierRaw = q.first(where: { $0.name == "session_id" })?.value
                     ?? q.first(where: { $0.name == "sessionId" })?.value
-        let displayName = q.first(where: { $0.name == "display_name" })?.value
+        let displayNameRaw = q.first(where: { $0.name == "display_name" })?.value
                         ?? q.first(where: { $0.name == "displayName" })?.value
-                        ?? email
-                        ?? userId
+                        ?? emailRaw
+                        ?? userIdRaw
+
+        // Decode percent-encoding and '+'-as-space from query values
+        func decodeQueryValue(_ v: String?) -> String? {
+            guard let v else { return nil }
+            let plusFixed = v.replacingOccurrences(of: "+", with: " ")
+            return plusFixed.removingPercentEncoding ?? plusFixed
+        }
+
+        let token = decodeQueryValue(tokenRaw)
+        let userId = decodeQueryValue(userIdRaw)
+        let email = decodeQueryValue(emailRaw)
+        let sessionIdentifier = decodeQueryValue(sessionIdentifierRaw)
+        let displayName = decodeQueryValue(displayNameRaw)
 
         guard let token else { return false }
 
@@ -194,3 +207,4 @@ final class AuthManager: ObservableObject {
         return "\(callbackScheme)://\(callbackHost)\(path)"
     }
 }
+

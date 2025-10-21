@@ -199,8 +199,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             if AuthManager.shared.handleCallback(url: url) {
-                // Optionally bring app to front after successful login
+                // Bring app to front and show the shelf window after successful login
                 NSApp.activate(ignoringOtherApps: true)
+                showWindowSuppressingActivationUpdate()
             }
         }
     }
