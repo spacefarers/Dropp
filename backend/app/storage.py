@@ -27,11 +27,11 @@ def upload_to_blob(
     Upload a file to Vercel Blob storage.
     Returns the blob response containing url, pathname, etc.
     """
-    options = {"pathname": pathname}
+    options = {}
     if content_type:
         options["content_type"] = content_type
 
-    response = vercel_blob.put(file_data, options=options)
+    response = vercel_blob.put(pathname, file_data, options=options)
     return response
 
 

@@ -21,6 +21,7 @@ struct ContentView: View {
     @EnvironmentObject private var shelf: Shelf
     @EnvironmentObject private var auth: AuthManager
     @State private var isSettingsMenuPresented = false
+    @State private var isRefreshing = false
 
     var body: some View {
         DropContainer(onDrop: handleDrop) {
@@ -118,18 +119,37 @@ struct ContentView: View {
     }
 
     private var refreshButton: some View {
-        Button {
-            NSApp.activate(ignoringOtherApps: true)
-            Task { await refreshCloudInventory() }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.clockwise")
+        Group {
+            if isRefreshing {
+                // Spinner while refreshing
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .frame(width: 28, height: 28) // keep button footprint consistent
+                    .padding(6)
+                    .help("Refreshing…")
+            } else {
+                Button {
+                    NSApp.activate(ignoringOtherApps: true)
+                    isRefreshing = true
+                    Task {
+                        defer { isRefreshing = false }
+                        await refreshCloudInventory()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .foregroundStyle(iconColor)
+                    .frame(width: 28, height: 28)
+                    .padding(6)
+                }
+                .buttonStyle(.plain)
+                .disabled(isRefreshing)
+                .help("Refresh Cloud State")
             }
-            .foregroundStyle(iconColor)
-            .padding(6)
         }
-        .buttonStyle(.plain)
-        .help("Refresh Cloud State")
+        .animation(.easeInOut(duration: 0.15), value: isRefreshing)
     }
 
     private var hideButton: some View {
@@ -612,7 +632,7 @@ private struct DraggableRowContainer<Content: View>: NSViewRepresentable {
          onExternalMove: ((ShelfItem) -> Void)? = nil,
          @ViewBuilder content: () -> Content) {
         self.item = item
-        self.onExternalMove = onExternalMove
+               self.onExternalMove = onExternalMove
         self.content = content()
     }
 

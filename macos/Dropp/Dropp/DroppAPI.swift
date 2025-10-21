@@ -66,17 +66,19 @@ final class DroppAPIClient {
         let filename = item.cloudInfo?.filename ?? fileURL.lastPathComponent
         guard !filename.isEmpty else { throw DroppAPIError.noFilename }
 
+        // Read data robustly (handles iCloud/File Provider and coordination)
         let fileData: Data
         do {
-            fileData = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+            fileData = try await readFileData(at: fileURL)
         } catch {
+            NSLog("❌ Upload read failed for \(fileURL.path): \(error.localizedDescription)")
             throw DroppAPIError.fileReadFailed
         }
 
         let contentType = item.cloudInfo?.contentType ?? "application/octet-stream"
         let size = item.cloudInfo?.size ?? Int64(fileData.count)
 
-        let url = DroppAPI.baseURL.appendingPathComponent("upload")
+        let url = DroppAPI.baseURL.appendingPathComponent("upload", isDirectory: true)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         auth.authorize(&request)
@@ -97,7 +99,9 @@ final class DroppAPIClient {
             fileData: fileData
         )
 
+        let t0 = Date()
         let (data, response) = try await session.data(for: request)
+        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "upload")
         try validateResponse(response, data: data)
     }
 
@@ -105,7 +109,10 @@ final class DroppAPIClient {
     func download(info: ShelfItem.CloudFileInfo) async throws -> Data {
         try requireAuth()
 
-        guard var components = URLComponents(url: DroppAPI.baseURL.appendingPathComponent("download"), resolvingAgainstBaseURL: false) else {
+        guard var components = URLComponents(
+            url: DroppAPI.baseURL.appendingPathComponent("download", isDirectory: true),
+            resolvingAgainstBaseURL: false
+        ) else {
             throw DroppAPIError.invalidURL
         }
         components.queryItems = [
@@ -118,7 +125,9 @@ final class DroppAPIClient {
         auth.authorize(&request)
         debugAssertAuthorizationHeader(request)
 
+        let t0 = Date()
         let (data, response) = try await session.data(for: request)
+        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "download")
         try validateResponse(response, data: data)
         return data
     }
@@ -127,7 +136,7 @@ final class DroppAPIClient {
     func remove(info: ShelfItem.CloudFileInfo) async throws {
         try requireAuth()
 
-        let url = DroppAPI.baseURL.appendingPathComponent("remove")
+        let url = DroppAPI.baseURL.appendingPathComponent("remove", isDirectory: true)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         auth.authorize(&request)
@@ -137,7 +146,9 @@ final class DroppAPIClient {
         let payload: [String: String] = ["filename": info.filename]
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
+        let t0 = Date()
         let (data, response) = try await session.data(for: request)
+        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "remove")
         try validateResponse(response, data: data)
     }
 
@@ -145,13 +156,16 @@ final class DroppAPIClient {
     func list() async throws -> (files: [ShelfItem.CloudFileInfo], storageUsed: Int64, storageCap: Int64) {
         try requireAuth()
 
-        let url = DroppAPI.baseURL.appendingPathComponent("list")
+        let url = DroppAPI.baseURL.appendingPathComponent("list", isDirectory: true)
+        NSLog(url.absoluteString)
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         auth.authorize(&request)
         debugAssertAuthorizationHeader(request)
 
+        let t0 = Date()
         let (data, response) = try await session.data(for: request)
+        logNetwork(request: request, response: response, data: data, startedAt: t0, purpose: "list")
         try validateResponse(response, data: data)
 
         let decoded = try JSONDecoder().decode(ListResponse.self, from: data)
@@ -214,6 +228,119 @@ final class DroppAPIClient {
 
         append("--\(boundary)--\(lineBreak)")
         return body
+    }
+
+    // Robust file read that handles iCloud/File Provider and coordinates access
+    private func readFileData(at url: URL) async throws -> Data {
+        // Reject plain directories (packages may still be directories; allow them)
+        let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey, .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey])
+        if values.isDirectory == true && values.isPackage == false {
+            throw DroppAPIError.fileReadFailed
+        }
+
+        // Ensure iCloud files are downloaded locally
+        if values.isUbiquitousItem == true {
+            try await ensureUbiquitousItemIsDownloaded(at: url)
+        }
+
+        // Coordinate the read to cooperate with File Providers
+        return try coordinatedRead(at: url)
+    }
+
+    private func coordinatedRead(at url: URL) throws -> Data {
+        var coordError: NSError?
+        var resultData: Data?
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordError) { coordinatedURL in
+            do {
+                resultData = try Data(contentsOf: coordinatedURL, options: .mappedIfSafe)
+            } catch {
+                resultData = nil
+            }
+        }
+        if let coordError { throw coordError }
+        guard let data = resultData else {
+            throw DroppAPIError.fileReadFailed
+        }
+        return data
+    }
+
+    private func ubiquitousStatus(for url: URL) throws -> URLUbiquitousItemDownloadingStatus? {
+        let vals = try url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey])
+        return vals.ubiquitousItemDownloadingStatus
+    }
+
+    private func ensureUbiquitousItemIsDownloaded(at url: URL) async throws {
+        // Kick off download if needed
+        do {
+            try FileManager.default.startDownloadingUbiquitousItem(at: url)
+        } catch {
+            // It may already be local; continue to poll status
+        }
+
+        // Poll until status == .current or timeout
+        let timeout: TimeInterval = 30
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            if let status = try? ubiquitousStatus(for: url), status == .current {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s
+        }
+        // If still not current, attempt read anyway; let it fail if unavailable
+    }
+
+    // MARK: - Logging
+
+    // Centralized logging for all backend responses
+    private func logNetwork(request: URLRequest, response: URLResponse, data: Data?, startedAt: Date, purpose: String) {
+        guard let http = response as? HTTPURLResponse else {
+            NSLog("↩️ [\(purpose)] Non-HTTP response from \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "<nil>")")
+            return
+        }
+
+        let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+        let method = request.httpMethod ?? "GET"
+        let urlString = request.url?.absoluteString ?? "<nil>"
+        let status = http.statusCode
+
+        // Headers (response)
+        let headerLines: [String] = http.allHeaderFields.compactMap { key, value in
+            "\(String(describing: key)): \(String(describing: value))"
+        }.sorted()
+
+        // Decide how to log body
+        let contentType = (http.allHeaderFields["Content-Type"] as? String) ?? (http.allHeaderFields["content-type"] as? String) ?? ""
+        let isLikelyText = contentType.contains("json")
+            || contentType.contains("text/")
+            || contentType.contains("xml")
+            || contentType.contains("yaml")
+
+        let maxPreviewBytes = 8 * 1024
+
+        var bodyPreview: String = ""
+        if let data, !data.isEmpty {
+            if isLikelyText, let text = String(data: data.prefix(maxPreviewBytes), encoding: .utf8) {
+                let truncated = data.count > maxPreviewBytes ? " …(truncated)" : ""
+                bodyPreview = "Body (\(data.count) bytes, text):\n\(text)\(truncated)"
+            } else {
+                // Hex preview for binary
+                let prefix = data.prefix(min(64, data.count))
+                let hex = prefix.map { String(format: "%02x", $0) }.joined(separator: " ")
+                let truncated = data.count > prefix.count ? " …(truncated)" : ""
+                bodyPreview = "Body (\(data.count) bytes, binary):\n\(hex)\(truncated)"
+            }
+        } else {
+            bodyPreview = "Body: <empty>"
+        }
+
+        NSLog("""
+        ↩️ [\(purpose)] \(method) \(urlString)
+           Status: \(status) • \(durationMs) ms
+           Response Headers:
+           \(headerLines.joined(separator: "\n   "))
+           \(bodyPreview)
+        """)
     }
 
     #if DEBUG
