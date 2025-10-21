@@ -468,13 +468,25 @@ private struct ShelfItemRow: View {
     }
 
     private func handleRemove(_ item: ShelfItem) {
-        // If cloud-only and logged in with a valid id, delete from backend first.
-        if item.cloudState == .cloudOnly, auth.isLoggedIn, let info = item.cloudInfo, let id = info.id, !id.isEmpty {
+        // If item exists in cloud (cloudOnly or both) and logged in with a valid id, delete from backend first.
+        if (item.cloudState == .cloudOnly || item.cloudState == .both),
+           auth.isLoggedIn,
+           let info = item.cloudInfo,
+           let id = info.id,
+           !id.isEmpty {
             item.cloudActivity = .removing
             Task { @MainActor in
                 defer { item.cloudActivity = .idle }
                 do {
                     try await DroppAPIClient.shared.remove(info: info)
+
+                    // Update usage if we know the size
+                    let size = info.size
+                    if size > 0 {
+                        let newUsed = max(0, shelf.cloudStorageUsed - size)
+                        shelf.cloudStorageUsed = newUsed
+                    }
+
                     onRemove(item)
                 } catch {
                     showErrorAlert(title: "Remove Failed", message: error.localizedDescription)

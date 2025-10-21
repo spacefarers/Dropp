@@ -394,10 +394,10 @@ private struct CloudFileInfoDTO: Decodable {
     let blobURL: URL?
 
     private enum CodingKeys: String, CodingKey {
-        case filename
+        case filename = "name"
         case size
         case contentType = "content_type"
-        case id
-        case blobURL = "blob_url"
+        case id = "_id"
+        case blobURL = "download_url"
     }
 }
