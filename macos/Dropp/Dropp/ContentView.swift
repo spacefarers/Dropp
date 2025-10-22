@@ -105,6 +105,7 @@ struct ContentView: View {
                         item: item,
                         onRemove: removeItem,
                         onReveal: revealInFinder,
+                        onRefresh: refreshCloudInventory,
                         borderColor: borderColor,
                         highlightBorderColor: highlightBorderColor,
                         surfaceColor: surfaceColor,
@@ -327,6 +328,7 @@ private struct ShelfItemRow: View {
     @ObservedObject var item: ShelfItem
     let onRemove: (ShelfItem) -> Void
     let onReveal: (ShelfItem) -> Void
+    let onRefresh: () async -> Void
     let borderColor: Color
     let highlightBorderColor: Color
     let surfaceColor: Color
@@ -345,7 +347,11 @@ private struct ShelfItemRow: View {
     private func rowContent(for url: URL) -> some View {
         HStack(alignment: .center, spacing: 10) {
             DraggableRowContainer(item: item, onExternalMove: { movedItem in
-                onRemove(movedItem)
+                // Only remove local-only items after drag
+                // Keep items that have cloud copies (.both)
+                if movedItem.cloudState == .localOnly {
+                    onRemove(movedItem)
+                }
             }) {
                 VStack(spacing: 8) {
                     thumbnailView(for: url, item: item)
@@ -441,8 +447,8 @@ private struct ShelfItemRow: View {
                 }
             }
             .frame(width: 24)
-            .opacity(isHovering ? 1 : 0)
-            .animation(.easeInOut(duration: 0.15), value: isHovering)
+            .opacity((isHovering || item.isCloudBusy) ? 1 : 0)
+            .animation(.easeInOut(duration: 0.15), value: isHovering || item.isCloudBusy)
         }
         .frame(width: 140, alignment: .leading)
         .padding(.vertical, 10)
@@ -518,20 +524,34 @@ private struct ShelfItemRow: View {
 
                     try await DroppAPIClient.shared.upload(item: item)
 
-                    // No correlation lookup after upload; just mark as both and update usage.
-                    item.cloudState = .both
-                    if item.cloudInfo == nil {
-                        item.cloudInfo = ShelfItem.CloudFileInfo(
-                            filename: item.resolvedURL().lastPathComponent,
-                            size: fileSize,
-                            contentType: "application/octet-stream",
-                            id: nil,
-                            downloadURL: nil
-                        )
-                    } else {
-                        item.cloudInfo?.size = fileSize
+                    // Wait for backend webhook to process and update database
+                    // Retry refresh a few times with delays to allow Vercel webhook to complete
+                    let filename = item.displayName
+                    var attempts = 0
+                    let maxAttempts = 5
+
+                    while attempts < maxAttempts {
+                        await onRefresh()
+
+                        // Check if file appeared in cloud with proper ID
+                        if item.cloudState == .both, item.cloudInfo?.id != nil {
+                            NSLog("✅ Upload correlation successful for: \(filename)")
+                            break
+                        }
+
+                        attempts += 1
+                        if attempts < maxAttempts {
+                            NSLog("⏳ Waiting for backend to process upload (\(attempts)/\(maxAttempts))...")
+                            try? await Task.sleep(nanoseconds: 1_000_000_000) // Wait 1 second
+                        }
                     }
-                    shelf.cloudStorageUsed = used + fileSize
+
+                    // Fallback: If still not correlated after retries, mark as .both but update usage
+                    if item.cloudState == .localOnly {
+                        NSLog("⚠️ Upload completed but cloud correlation failed, marking as .both anyway")
+                        item.cloudState = .both
+                        shelf.cloudStorageUsed = used + fileSize
+                    }
                 } catch {
                     showErrorAlert(title: "Upload Failed", message: error.localizedDescription)
                 }

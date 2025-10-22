@@ -40,8 +40,26 @@ final class Shelf: ObservableObject {
     }
 
     func addPhantomCloudItem(filename: String, size: Int64, contentType: String, id: String?, downloadURL: URL?) {
-        // Avoid duplicates by filename
-        if items.contains(where: { $0.displayName == filename }) { return }
+        // Check if a local file with the same name already exists
+        if let existingItem = items.first(where: { $0.displayName == filename }) {
+            // If it's a local-only item, promote it to both local and cloud
+            if existingItem.cloudState == .localOnly {
+                existingItem.cloudState = .both
+                existingItem.cloudInfo = ShelfItem.CloudFileInfo(
+                    filename: filename,
+                    size: size,
+                    contentType: contentType,
+                    id: id,
+                    downloadURL: downloadURL
+                )
+                NSLog("Promoted local item to 'both' state: \(filename)")
+                logContents()
+            }
+            // If it already exists as cloudOnly or both, do nothing
+            return
+        }
+
+        // No existing item with this name, create a new phantom cloud-only item
         let info = ShelfItem.CloudFileInfo(filename: filename, size: size, contentType: contentType, id: id, downloadURL: downloadURL)
         let phantom = ShelfItem(cloudOnly: info)
         items.append(phantom)
@@ -68,6 +86,7 @@ final class Shelf: ObservableObject {
     func syncCloudPresence(with cloudFilenames: Set<String>) {
         var removedCloudOnly: [String] = []
         var demotedToLocal: [String] = []
+        var promoted: [String] = []
 
         items.removeAll { item in
             let filename = item.displayName
@@ -82,6 +101,10 @@ final class Shelf: ObservableObject {
                 item.cloudState = .localOnly
                 item.cloudInfo = nil
                 demotedToLocal.append(filename)
+            } else if item.cloudState == .localOnly && existsInCloud {
+                // For local-only items that exist in cloud, they will be promoted to .both
+                // This is just for logging; the actual promotion happens in addPhantomCloudItem
+                promoted.append(filename)
             }
 
             return false
@@ -93,8 +116,11 @@ final class Shelf: ObservableObject {
         if !demotedToLocal.isEmpty {
             NSLog("Demoted \(demotedToLocal.count) item(s) to local-only: \(demotedToLocal)")
         }
+        if !promoted.isEmpty {
+            NSLog("Found \(promoted.count) local item(s) that will be promoted to 'both': \(promoted)")
+        }
 
-        if !removedCloudOnly.isEmpty || !demotedToLocal.isEmpty {
+        if !removedCloudOnly.isEmpty || !demotedToLocal.isEmpty || !promoted.isEmpty {
             logContents()
         }
     }
