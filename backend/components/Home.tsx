@@ -5,8 +5,8 @@ import { useMemo } from 'react';
 
 export default function Home({ navAuth, primaryCta }: { navAuth?: React.ReactNode; primaryCta?: React.ReactNode }) {
   const year = useMemo(() => new Date().getFullYear(), []);
-  const navContent = navAuth ?? <Link className="header-link" href="/login">Sign in</Link>;
-  const primary = primaryCta ?? <Link className="btn btn-primary" href="/login">Open Dropp</Link>;
+  const navContent = navAuth ?? null;
+  const primary = primaryCta ?? <a className="btn btn-primary" href="https://github.com/spacefarers/Dropp/releases" target="_blank" rel="noreferrer">Download Dropp</a>;
 
   return (
     <>
