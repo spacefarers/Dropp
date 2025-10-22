@@ -116,7 +116,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_login);
         Button loginButton = findViewById(R.id.login_button);
         loginButton.setOnClickListener(v -> {
-            Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://dropp.yangm.tech/login"));
+            Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://dropp.yangm.tech/login?redirect_uri=dropp://auth/callback"));
             startActivity(browserIntent);
         });
     }
@@ -156,7 +156,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void checkStorageAndUpload(byte[] fileBytes, String fileName, long fileSize, Uri fileUri) {
         Request request = new Request.Builder()
-                .url("https://droppapi.yangm.tech/list")
+                .url("https://dropp.yangm.tech/api/list")
                 .addHeader("Authorization", "Bearer " + sessionManager.getToken())
                 .build();
 
@@ -210,7 +210,7 @@ public class MainActivity extends AppCompatActivity {
                 .build();
 
         Request request = new Request.Builder()
-                .url("https://droppapi.yangm.tech/upload/")
+                .url("https://dropp.yangm.tech/api/upload/")
                 .addHeader("Authorization", "Bearer " + sessionManager.getToken())
                 .post(requestBody)
                 .build();

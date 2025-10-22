@@ -87,7 +87,7 @@ public class FirstFragment extends Fragment implements FileAdapter.OnFileClickLi
         }
 
         Request request = new Request.Builder()
-                .url("https://droppapi.yangm.tech/list")
+                .url("https://dropp.yangm.tech/api/list")
                 .addHeader("Authorization", "Bearer " + token)
                 .build();
 
@@ -119,14 +119,15 @@ public class FirstFragment extends Fragment implements FileAdapter.OnFileClickLi
                                 Log.d(TAG, "fetchFiles: Parsed " + jsonArray.length() + " files");
                                 for (int i = 0; i < jsonArray.length(); i++) {
                                     JSONObject jsonObject = jsonArray.getJSONObject(i);
-                                    String id = jsonObject.getString("id");
-                                    String name = jsonObject.getString("filename");
+                                    String id = jsonObject.getString("_id");
+                                    String name = jsonObject.getString("name");
                                     long size = jsonObject.getLong("size");
-                                    String blobUrl = jsonObject.getString("blob_url");
+                                    String blobUrl = jsonObject.getString("download_url");
                                     files.add(new File(id, name, size, blobUrl));
                                     Log.d(TAG, "fetchFiles: Added file: " + name + " (" + size + " bytes)");
                                 }
                                 adapter.notifyDataSetChanged();
+                                updateEmptyView();
                                 Log.d(TAG, "fetchFiles: Adapter notified, total files: " + files.size());
                             } catch (JSONException e) {
                                 Log.e(TAG, "fetchFiles: JSON parsing error", e);
@@ -144,6 +145,18 @@ public class FirstFragment extends Fragment implements FileAdapter.OnFileClickLi
                 }
             }
         });
+    }
+
+    private void updateEmptyView() {
+        if (files.isEmpty()) {
+            binding.recyclerView.setVisibility(View.GONE);
+            binding.emptyView.setVisibility(View.VISIBLE);
+            binding.emptyViewIcon.setVisibility(View.VISIBLE);
+        } else {
+            binding.recyclerView.setVisibility(View.VISIBLE);
+            binding.emptyView.setVisibility(View.GONE);
+            binding.emptyViewIcon.setVisibility(View.GONE);
+        }
     }
 
     @Override
@@ -225,7 +238,7 @@ public class FirstFragment extends Fragment implements FileAdapter.OnFileClickLi
     @Override
     public void onDeleteClick(File file) {
         Request request = new Request.Builder()
-                .url("https://droppapi.yangm.tech/files/" + file.getId())
+                .url("https://dropp.yangm.tech/api/files/" + file.getId())
                 .addHeader("Authorization", "Bearer " + sessionManager.getToken())
                 .delete()
                 .build();
