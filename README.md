@@ -17,7 +17,7 @@ Currently working for macOS and Android, with Windows support coming soon.
 
 Here's the macOS app in action:
 
-![Dropp macOS Demo](./macos/Demo.gif)
+![Dropp macOS Demo](./demo.gif)
 
 ## Key Features
 
